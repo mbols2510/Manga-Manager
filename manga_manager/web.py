@@ -18,6 +18,7 @@ from .config import Config
 from .covers import CoverStore
 from .frames import FrameStore, slug
 from .history import History
+from .preferred import RANK_LABELS, detect_rank
 from .scheduler import Scheduler
 
 log = logging.getLogger(__name__)
@@ -38,7 +39,7 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
                limiter: LoginLimiter | None = None,
                titles: Callable[[], dict[str, list[str]]] | None = None,
                reprocess: Callable[[str, bool], dict] | None = None,
-               ctx=None) -> Flask:
+               ctx=None, preview: Callable[[str], dict] | None = None) -> Flask:
     """titles: returns {"suwayomi": [...], "kavita": [...]}, the names suggested in the alias form.
     reprocess: (suwayomi_title, apply) -> what it moved or would move into the alias's series (#16)."""
     app = Flask(__name__)
@@ -87,6 +88,7 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
 
     # ------------------------------------------------------------ aliases (#12)
     cfg.dashboard_aliases = history.aliases()
+    cfg.dashboard_ranks = history.alias_ranks()
     suggestions = {"at": 0.0, "data": None}
     suggestions_lock = threading.Lock()
 
@@ -100,9 +102,12 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
     def alias_list() -> dict:
         dash = history.aliases()
         cfg.dashboard_aliases = dash
+        cfg.dashboard_ranks = history.alias_ranks()
         mine = {k.casefold() for k in dash}
-        items = [{"suwayomi_title": k, "kavita_name": v, "source": "dashboard"} for k, v in dash.items()]
-        items += [{"suwayomi_title": k, "kavita_name": v, "source": "config", "overridden": k.casefold() in mine}
+        items = [{"suwayomi_title": k, "kavita_name": v, "source": "dashboard",
+                  "rank": cfg.dashboard_ranks.get(k.casefold(), 0), "rank_auto": detect_rank(k)} for k, v in dash.items()]
+        items += [{"suwayomi_title": k, "kavita_name": v, "source": "config", "overridden": k.casefold() in mine,
+                   "rank": 0, "rank_auto": detect_rank(k)}
                   for k, v in cfg.aliases.items()]
         items.sort(key=lambda i: (i["suwayomi_title"].casefold(), i["source"] != "dashboard"))
         return {"items": items, "can_edit": can_edit_aliases()}
@@ -284,7 +289,13 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
             return jsonify({"error": "Fill in both the Suwayomi title and the Kavita series."}), 400
         if suwa.casefold() == kav.casefold():
             return jsonify({"error": "Both names are the same, so no alias is needed."}), 400
-        history.set_alias(suwa, kav, user=session.get("user"), previous=previous)
+        try:
+            rank = int(data.get("rank") or 0)
+        except (TypeError, ValueError):
+            rank = -1
+        if rank not in RANK_LABELS:
+            return jsonify({"error": "Pick a valid source type."}), 400
+        history.set_alias(suwa, kav, user=session.get("user"), previous=previous, rank=rank)
         log.info("Alias %r -> %r saved on the dashboard%s", suwa, kav,
                  f" by {session['user']}" if session.get("user") else "")
         return jsonify(alias_list())
@@ -328,6 +339,22 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
             log.info("Alias %r reprocessed from the dashboard%s: %s", title,
                      f" by {session['user']}" if session.get("user") else "", result.get("message"))
         return jsonify(result)
+
+    @app.post("/api/aliases/preferred-preview")
+    def preferred_preview():
+        if preview is None:
+            return jsonify({"error": "Preview isn't available here."}), 404
+        try:
+            title = clean_title((request.get_json(silent=True) or {}).get("suwayomi_title"))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        if not title:
+            return jsonify({"error": "Which title?"}), 400
+        try:
+            return jsonify(preview(title))
+        except Exception as exc:
+            log.exception("Preferred-source preview for %r failed", title)
+            return jsonify({"error": f"Preview failed: {exc}"}), 500
 
     @app.get("/api/aliases/suggestions")
     def alias_suggestions():

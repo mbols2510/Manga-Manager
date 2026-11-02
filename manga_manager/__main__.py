@@ -65,7 +65,7 @@ def prepare(cfg: Config) -> tuple[Database, Settings]:
     """Connect to Postgres and let the saved Settings override config.yml / .env."""
     db = open_database(cfg)
     settings = Settings(db)
-    from . import guard as _guard  # noqa: F401  registers the NAS settings
+    from . import guard as _guard, preferred as _preferred  # noqa: F401  register their settings
     from .tools import import_settings_only
     import_settings_only()           # registers every tab's settings
     settings.apply_to_config(cfg)
@@ -309,7 +309,7 @@ def serve(cfg: Config, db: Database, settings: Settings) -> int:
         log.info("Dashboard listening on http://%s:%d", cfg.web_host, cfg.web_port)
         flask_app = create_app(cfg, history, covers, scheduler, titles=title_lists(cfg, suwayomi, kavita),
                                reprocess=lambda title, apply: make_pipeline().reprocess_alias(title, apply),
-                               ctx=ctx)
+                               ctx=ctx, preview=lambda title: make_pipeline().preview_preferred(title))
         scheduler.start()
         ctx.jobs.start()
         waitress_serve(flask_app, host=cfg.web_host, port=cfg.web_port, threads=8, ident="manga-manager")

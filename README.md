@@ -40,6 +40,18 @@ Use an existing database (or create one first). The tables are created automatic
 
 `SUWAYOMI_DOWNLOADS` and `MANGA_ROOT` in `.env` set the host side.
 
+## Official and uncensored versions
+
+Suwayomi titles with `(Official)`, `(Uncensored)` or `(Official Uncensored)` in the name are recognised as preferred
+sources (rank: official, uncensored, official uncensored, then normal). For titles with a completely different name, open
+**Aliases**, pick the Suwayomi title and the Kavita series from the dropdowns and set the **Source type**.
+
+When a chapter arrives from a higher-ranked source than the file Kavita already has, it replaces that file. The old file
+goes to the trash (restorable on the **Doubles** tab, deleted after the retention period). A chapter from a lower-ranked
+source than what Kavita has is dropped the same way. If the preferred file has far fewer pages (default under 60%) both
+files are kept and the chapter shows as a duplicate. **Preview** on an alias shows what the waiting downloads would replace.
+Chapters the official source doesn't have yet stay as they are. The switches are under **Settings → Preferred sources**.
+
 ## Weekly double-chapter digest
 
 Every Monday at 09:00 (container timezone; weekday and hour are in **Settings → Double chapters**) the

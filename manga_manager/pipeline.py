@@ -15,6 +15,7 @@ from .covers import CoverStore
 from .history import History
 from .kavita import KavitaClient, KavitaIndex, KavitaSeries
 from .notifier import Notifier
+from . import preferred
 from .suwayomi import ActiveDownloads, SuwayomiClient, SuwayomiIndex, SuwayomiManga
 
 log = logging.getLogger(__name__)
@@ -32,7 +33,9 @@ class Processed:
     history_id: int | None = None
     replaced: list[str] = field(default_factory=list)   # same file name was already in Kavita (overwritten)
     duplicates: list[str] = field(default_factory=list) # chapter already in Kavita under another file name (#10)
-    display_title: str = ""                            # Kavita's name (alias) when known
+    display_title: str = ""                  # Kavita's name (alias) when known
+    plan: "preferred.Plan | None" = None
+    rank: int = 0                            # source type: 0 normal, 1 official, 2 uncensored, 3 both
 
     def __post_init__(self):
         self.display_title = self.display_title or self.title
@@ -148,13 +151,13 @@ class Pipeline:
             return True
         return False
 
-    def _ready_files(self, manga_dir: Path) -> list[Path]:
+    def _ready_files(self, manga_dir: Path, ignore_settle: bool = False) -> list[Path]:
         """Chapter archives that finished downloading (untouched for settle_seconds)."""
-        cutoff = time.time() - self.cfg.settle_seconds
+        cutoff = time.time() - (0 if ignore_settle else self.cfg.settle_seconds)
         files = []
         for f in manga_dir.iterdir():
             if f.is_file() and f.suffix.lower() in self.cfg.extensions:
-                if f.stat().st_mtime <= cutoff:
+                if ignore_settle or f.stat().st_mtime <= cutoff:
                     files.append(f)
                 else:
                     log.debug("Skipping %s, still being written", f.name)
@@ -164,6 +167,7 @@ class Pipeline:
         """Pick up aliases edited on the dashboard (#12), also in a separate run-once process."""
         try:
             self.cfg.dashboard_aliases = self.history.aliases()
+            self.cfg.dashboard_ranks = self.history.alias_ranks()
         except Exception as exc:  # never stop a run over this
             log.warning("Could not read the dashboard aliases: %s", exc)
 
@@ -177,11 +181,12 @@ class Pipeline:
 
     # ------------------------------------------------------------ one manga
     def _process_folder(self, manga_dir: Path, suwa_index: SuwayomiIndex, kavita_index: KavitaIndex,
-                        result: RunResult, downloading: ActiveDownloads | None = None) -> Processed | None:
-        if self._still_downloading(manga_dir):
+                        result: RunResult, downloading: ActiveDownloads | None = None,
+                        preview: bool = False) -> Processed | None:
+        if not preview and self._still_downloading(manga_dir):
             result.waiting.append(manga_dir.name)
             return None
-        files = self._ready_files(manga_dir)
+        files = self._ready_files(manga_dir, ignore_settle=preview)
         if not files:
             return None
 
@@ -194,7 +199,7 @@ class Pipeline:
             result.skipped.append(msg)
             return None
 
-        if downloading is not None and downloading.contains(suwa):
+        if downloading is not None and not preview and downloading.contains(suwa):
             left = downloading.left(suwa)
             log.info("Waiting for %s: Suwayomi still has %s chapter(s) queued or downloading", suwa.title,
                      left or "some")
@@ -219,11 +224,37 @@ class Pipeline:
         replaced, duplicates = self._existing_chapters(labels, destination)
         display = self.cfg.display_title(suwa.title, existing.name if existing else None)
 
+        # Official / uncensored sources replace the same chapter from a lower-ranked one (see preferred.py).
+        rank = self.cfg.source_rank(suwa.title)
+        plan = preferred.make_plan(self.cfg, self.history, labels, destination, rank)
+        for label in plan.replaced_labels:
+            duplicates = [d for d in duplicates if d != label]
+            if label not in replaced:
+                replaced = sorted([*replaced, label], key=chapter_sort_key)
+        for label, why in plan.flagged:
+            log.warning("%s chapter %s: %s", suwa.title, label, why)
+        if preview:
+            return Processed(title=suwa.title, suwayomi=suwa, library=library, chapters=chapters,
+                             destination=destination, is_new=existing is None, kavita_series=existing,
+                             replaced=replaced, duplicates=duplicates, display_title=display, plan=plan, rank=rank)
+        if plan.replace or plan.drop:
+            files = self._apply_plan(plan, files, existing, library, destination, suwa.title)
+            labels = {f: labels[f] for f in files}
+            chapters = sorted(set(labels.values()), key=chapter_sort_key)
+            if not files:
+                self._cleanup_empty(manga_dir)
+                msg = f"{suwa.title}: every chapter already exists from a higher-ranked source, nothing moved"
+                log.info(msg)
+                result.skipped.append(msg)
+                return None
+
         log.info("%s -> %s (%s, %s, %d chapter(s)%s%s)", suwa.title, destination, library.label,
                  "existing" if existing else "new", len(files),
                  f", {len(replaced)} replacing existing" if replaced else "",
                  f", {len(duplicates)} duplicate(s) of existing chapters" if duplicates else "")
         self._move_files(files, destination)
+        if not self.cfg.dry_run:
+            self.history.record_sources(str(destination), [(f.name, chapter_key(labels[f]), rank, suwa.id) for f in files])
         self._cleanup_empty(manga_dir)
         if existing and self.cfg.align_series_name:
             self._align_series_name(files, destination, existing.name)
@@ -234,7 +265,7 @@ class Pipeline:
 
         item = Processed(title=suwa.title, suwayomi=suwa, library=library, chapters=chapters,
                          destination=destination, is_new=existing is None, kavita_series=existing,
-                         replaced=replaced, duplicates=duplicates, display_title=display)
+                         replaced=replaced, duplicates=duplicates, display_title=display, plan=plan, rank=rank)
         if not self.cfg.dry_run:
             item.history_id = self.history.add_update(
                 title=display, category=library.label, is_new=item.is_new, chapters=chapters,
@@ -243,6 +274,63 @@ class Pipeline:
                 replaced=replaced, duplicates=duplicates, destination=str(destination),
             )
         return item
+
+    def _apply_plan(self, plan: "preferred.Plan", files: list[Path], existing: KavitaSeries | None,
+                    library: LibraryConfig, destination: Path, title: str) -> list[Path]:
+        """Trash the files the preferred source replaces, drop the incoming ones a better file already covers.
+        Returns the incoming files that still have to be moved."""
+        if self.cfg.dry_run:
+            for incoming, old, label in plan.replace:
+                log.info("[dry-run] would replace %s with %s (chapter %s)", old.name, incoming.name, label)
+            for incoming, old, label in plan.drop:
+                log.info("[dry-run] would drop %s: %s is from a higher-ranked source", incoming.name, old.name)
+            return [f for f in files if f not in plan.dropped]
+        series_name = existing.name if existing else title
+        series_id = existing.id if existing else None
+        gone = []
+        for incoming, old, label in plan.replace:
+            if old.exists():
+                preferred.to_trash(self.history.db, self.cfg.data_dir, old, series_name, series_id,
+                                   library.kavita_library_id, old, "replaced by a preferred source")
+                gone.append(old.name)
+                log.info("Replaced %s with %s (chapter %s); the old file is in the trash", old.name, incoming.name, label)
+        self.history.forget_sources(str(destination), gone)
+        for incoming, old, label in plan.drop:
+            preferred.to_trash(self.history.db, self.cfg.data_dir, incoming, series_name, series_id,
+                               library.kavita_library_id, destination / incoming.name,
+                               "lower-ranked source, a better file exists")
+            log.info("Dropped %s: %s is from a higher-ranked source", incoming.name, old.name)
+        return [f for f in files if f not in plan.dropped]
+
+    def preview_preferred(self, suwayomi_title: str) -> dict:
+        """What the preferred-source rules would do with the downloads of this title waiting in Suwayomi's folder."""
+        self.refresh_aliases()
+        rank = self.cfg.source_rank(suwayomi_title)
+        out = {"rank": rank, "rank_label": preferred.RANK_LABELS.get(rank, "Normal"), "folders": [], "message": ""}
+        if not rank:
+            out["message"] = "This title isn't marked as official or uncensored, so nothing is replaced."
+            return out
+        wanted = normalize_title(suwayomi_title)
+        suwa_index = SuwayomiIndex(self.suwayomi.library())
+        kavita_index = KavitaIndex(self.kavita.all_series())
+        dummy = RunResult()
+        if self.cfg.downloads.is_dir():
+            for source_dir in sorted(self.cfg.downloads.iterdir()):
+                if not source_dir.is_dir():
+                    continue
+                for manga_dir in sorted(source_dir.iterdir()):
+                    if not manga_dir.is_dir() or normalize_title(manga_dir.name) != wanted:
+                        continue
+                    p = self._process_folder(manga_dir, suwa_index, kavita_index, dummy, None, preview=True)
+                    if p is not None and p.plan is not None:
+                        out["folders"].append({"folder": manga_dir.name, "files": len(p.chapters), **p.plan.summary()})
+        if not out["folders"]:
+            out["message"] = ("No downloaded chapters of this title are waiting in Suwayomi's folder right now. "
+                              f"New {preferred.RANK_LABELS[rank].lower()} chapters will replace the same chapter from a normal source.")
+        else:
+            n = sum(f["replace"] for f in out["folders"])
+            out["message"] = f"{n} existing file(s) would be replaced; the old ones go to the trash."
+        return out
 
     # ------------------------------------------------------------ reprocess (#16)
     def reprocess_alias(self, suwayomi_title: str, apply: bool = False) -> dict:

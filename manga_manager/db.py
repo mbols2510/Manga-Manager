@@ -59,6 +59,18 @@ CREATE TABLE IF NOT EXISTS aliases (
     updated_by     TEXT
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_aliases_ci ON aliases (lower(suwayomi_title));
+-- Source type of a Suwayomi title: 0 normal, 1 official, 2 uncensored, 3 official uncensored.
+ALTER TABLE aliases ADD COLUMN IF NOT EXISTS rank INTEGER NOT NULL DEFAULT 0;
+-- Which source each chapter file in a Kavita folder came from (to replace lower-ranked ones with official).
+CREATE TABLE IF NOT EXISTS chapter_sources (
+    series_dir  TEXT NOT NULL,
+    file_name   TEXT NOT NULL,
+    chapter_key TEXT NOT NULL,
+    rank        INTEGER NOT NULL DEFAULT 0,
+    suwayomi_id INTEGER,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (series_dir, file_name)
+);
 CREATE TABLE IF NOT EXISTS users (
     username      TEXT PRIMARY KEY,
     password_hash TEXT NOT NULL,

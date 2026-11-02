@@ -97,15 +97,42 @@ class History:
             return {r["suwayomi_title"]: r["kavita_name"] for r in c.execute(
                 "SELECT suwayomi_title, kavita_name FROM aliases ORDER BY lower(suwayomi_title)")}
 
+    def alias_ranks(self) -> dict[str, int]:
+        """casefolded Suwayomi title -> source type (0 normal, 1 official, 2 uncensored, 3 both)."""
+        with self.db.connect() as c:
+            return {r["suwayomi_title"].casefold(): int(r["rank"]) for r in c.execute(
+                "SELECT suwayomi_title, rank FROM aliases WHERE rank > 0")}
+
+    def source_ranks(self, series_dir: str) -> dict[str, int]:
+        with self.db.connect() as c:
+            return {r["file_name"]: int(r["rank"]) for r in c.execute(
+                "SELECT file_name, rank FROM chapter_sources WHERE series_dir=%s", (series_dir,))}
+
+    def record_sources(self, series_dir: str, entries: list[tuple[str, str, int, int | None]]) -> None:
+        """entries: (file_name, chapter_key, rank, suwayomi_id)."""
+        if not entries:
+            return
+        with self.db.connect() as c:
+            for name, key, rank, sid in entries:
+                c.execute("INSERT INTO chapter_sources (series_dir,file_name,chapter_key,rank,suwayomi_id) "
+                          "VALUES (%s,%s,%s,%s,%s) ON CONFLICT (series_dir,file_name) DO UPDATE SET "
+                          "chapter_key=excluded.chapter_key, rank=excluded.rank, suwayomi_id=excluded.suwayomi_id, "
+                          "created_at=now()", (series_dir, name, key, rank, sid))
+
+    def forget_sources(self, series_dir: str, names: list[str]) -> None:
+        if names:
+            with self.db.connect() as c:
+                c.execute("DELETE FROM chapter_sources WHERE series_dir=%s AND file_name = ANY(%s)", (series_dir, names))
+
     def set_alias(self, suwayomi_title: str, kavita_name: str, user: str | None = None,
-                  previous: str | None = None) -> None:
+                  previous: str | None = None, rank: int = 0) -> None:
         """Add or change an alias; with previous, the alias that was stored under that title is replaced."""
         with self.db.connect() as c:
             if previous is not None and previous.casefold() != suwayomi_title.casefold():
                 c.execute("DELETE FROM aliases WHERE suwayomi_title = %s", (previous,))
             c.execute("DELETE FROM aliases WHERE lower(suwayomi_title) = lower(%s)", (suwayomi_title,))
-            c.execute("INSERT INTO aliases (suwayomi_title, kavita_name, updated_by) VALUES (%s,%s,%s)",
-                      (suwayomi_title, kavita_name, user))
+            c.execute("INSERT INTO aliases (suwayomi_title, kavita_name, updated_by, rank) VALUES (%s,%s,%s,%s)",
+                      (suwayomi_title, kavita_name, user, int(rank)))
 
     def delete_alias(self, suwayomi_title: str) -> bool:
         with self.db.connect() as c:

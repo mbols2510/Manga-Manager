@@ -83,13 +83,29 @@
       series a Suwayomi title belongs to. The Kavita name is also used in notifications and on this page.
       Changes apply from the next run. <strong>Move chapters</strong> moves chapters that were already filed under the Suwayomi name into the Kavita series.</p>
     <form class="alias-form" id="alias-form" hidden autocomplete="off">
-      <label>Suwayomi title<input id="alias-suwa" list="alias-suwa-list" required maxlength="300" placeholder="Name in Suwayomi"></label>
-      <label>Kavita series<input id="alias-kav" list="alias-kav-list" required maxlength="300" placeholder="Name in Kavita"></label>
+      <label>Suwayomi title
+        <span class="combo" id="combo-suwa">
+          <input id="alias-suwa" role="combobox" aria-expanded="false" aria-controls="combo-suwa-list" aria-autocomplete="list" required maxlength="300" placeholder="Choose from Suwayomi or type">
+          <button class="combo-btn" type="button" aria-label="Show all Suwayomi titles" tabindex="-1"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+          <ul class="combo-list" id="combo-suwa-list" role="listbox" hidden></ul>
+        </span></label>
+      <label>Kavita series
+        <span class="combo" id="combo-kav">
+          <input id="alias-kav" role="combobox" aria-expanded="false" aria-controls="combo-kav-list" aria-autocomplete="list" required maxlength="300" placeholder="Choose from Kavita or type">
+          <button class="combo-btn" type="button" aria-label="Show all Kavita series" tabindex="-1"><svg class="i" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+          <ul class="combo-list" id="combo-kav-list" role="listbox" hidden></ul>
+        </span></label>
+      <label class="wide">Source type
+        <select id="alias-rank">
+          <option value="0">Normal</option><option value="1">Official</option>
+          <option value="2">Uncensored</option><option value="3">Official uncensored</option>
+        </select>
+        <span class="hint">Official and uncensored chapters replace the same chapter from a lower-ranked source. The old file goes to the trash and can be restored on the Doubles tab. Titles with (Official) or (Uncensored) in the name are recognised automatically.</span>
+      </label>
       <div class="actions">
         <button class="btn sig" type="submit" id="alias-save">Add alias</button>
         <button class="btn" type="button" id="alias-cancel" hidden>Cancel</button>
       </div>
-      <datalist id="alias-suwa-list"></datalist><datalist id="alias-kav-list"></datalist>
     </form>
     <p class="alias-note" id="alias-readonly" hidden>You can look at the aliases, but only accounts listed in config.yml can change them.</p>
     <p class="alias-msg" id="alias-msg" role="status" aria-live="polite"></p>
@@ -355,8 +371,49 @@ document.addEventListener("keydown", (e) => {
 
 // ---------- aliases (#12) and moving chapters (#16) ----------
 const aliasDlg = $("#aliases"), aliasForm = $("#alias-form"), aliasMsg = $("#alias-msg");
-const aliasState = { editing: null, items: [], suggested: false, pending: null };
+const aliasState = { editing: null, items: [], suggested: false, pending: null, suwa: [], kav: [] };
 function aliasNote(text, kind = "") { aliasMsg.textContent = text; aliasMsg.className = "alias-msg" + (kind ? " " + kind : ""); }
+const RANKS = ["Normal", "Official", "Uncensored", "Official uncensored"];
+const detectRank = (t) => (/\bofficial\b/i.test(t) ? 1 : 0) + (/\buncensored\b/i.test(t) ? 2 : 0);
+const looseKey = (t) => t.replace(/\([^()]*\)|\[[^\]]*\]|\{[^}]*\}/g, " ").normalize("NFKD").toLowerCase().replace(/[^a-z0-9]+/g, "");
+
+// A searchable dropdown over an input: type to filter, arrows and Enter to pick, the chevron shows the whole list.
+function combo(input, items, onPick) {
+  const wrap = input.closest(".combo"), list = wrap.querySelector(".combo-list"), btn = wrap.querySelector(".combo-btn");
+  let shown = [], active = -1;
+  const setActive = (i) => {
+    active = i;
+    list.querySelectorAll("[role=option]").forEach((li, n) => li.setAttribute("aria-selected", n === i ? "true" : "false"));
+    if (i >= 0) { input.setAttribute("aria-activedescendant", `${list.id}-${i}`); list.children[i].scrollIntoView({ block: "nearest" }); }
+    else input.removeAttribute("aria-activedescendant");
+  };
+  const close = () => { list.hidden = true; input.setAttribute("aria-expanded", "false"); setActive(-1); };
+  const open = (all) => {
+    const q = all ? "" : input.value.trim().toLowerCase();
+    const pool = items();
+    const hits = pool.filter(x => !q || x.toLowerCase().includes(q));
+    shown = hits.slice(0, 80);
+    const tag = (x) => { const r = detectRank(x); return r ? `<span class="tag">${RANKS[r].toLowerCase()}</span>` : ""; };
+    list.innerHTML = shown.map((x, i) => `<li role="option" id="${list.id}-${i}" data-i="${i}" aria-selected="false"><span>${esc(x)}</span>${tag(x)}</li>`).join("")
+      + (hits.length > shown.length ? `<li class="none">${hits.length - shown.length} more, keep typing to narrow it down</li>` : "")
+      || (pool.length ? `<li class="none">No match. Your own text is used as typed.</li>` : `<li class="none">Titles are still loading, or the connection isn’t set up. You can type a name.</li>`);
+    list.hidden = false; input.setAttribute("aria-expanded", "true"); setActive(-1);
+  };
+  const pick = (i) => { input.value = shown[i]; close(); onPick && onPick(shown[i]); };
+  input.addEventListener("input", () => open(false));
+  input.addEventListener("focus", () => { if (input.value === "") open(true); });
+  btn.addEventListener("click", () => { if (list.hidden) { open(true); input.focus(); } else close(); });
+  list.addEventListener("mousedown", (e) => { e.preventDefault(); const li = e.target.closest("[data-i]"); if (li) pick(Number(li.dataset.i)); });
+  input.addEventListener("blur", () => setTimeout(close, 100));
+  input.addEventListener("keydown", (e) => {
+    const isOpen = !list.hidden;
+    if (e.key === "ArrowDown") { e.preventDefault(); if (!isOpen) open(input.value === ""); else setActive(Math.min(active + 1, shown.length - 1)); }
+    else if (e.key === "ArrowUp" && isOpen) { e.preventDefault(); setActive(Math.max(active - 1, 0)); }
+    else if (e.key === "Enter" && isOpen && active >= 0) { e.preventDefault(); pick(active); }
+    else if (e.key === "Escape" && isOpen) { e.preventDefault(); e.stopPropagation(); close(); }
+  });
+}
+
 function aliasReset() {
   aliasState.editing = null; aliasForm.reset();
   $("#alias-save").textContent = "Add alias"; $("#alias-cancel").hidden = true;
@@ -377,15 +434,18 @@ function aliasRender(data) {
   const rows = aliasState.items.map((a, i) => {
     const fromCfg = a.source === "config";
     const tag = fromCfg ? `<span class="src" title="Set in config.yml">config.yml</span>` : "";
+    const eff = a.rank || a.rank_auto || 0;
+    const rankTag = eff ? `<span class="src rank" title="Chapters from this source replace the same chapter from a lower-ranked source">${RANKS[eff]}${a.rank ? "" : " (from the name)"}</span>` : "";
+    const prev = eff ? `<button class="btn sm" type="button" data-act="preview" data-i="${i}" title="Show what would be replaced by the chapters waiting in Suwayomi">Preview</button>` : "";
     const over = a.overridden ? `<span class="src" title="An alias added on the dashboard replaces this one">replaced</span>` : "";
     const move = `<button class="btn sm" type="button" data-act="move" data-i="${i}" title="Move chapters filed under the Suwayomi name into the Kavita series">Move chapters</button>`;
     let actions = "";
     if (canEdit) actions = fromCfg
-      ? (a.overridden ? "" : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Change</button>${move}`)
-      : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Edit</button>${move}<button class="btn sm" type="button" data-act="del" data-i="${i}">Delete</button>`;
+      ? (a.overridden ? "" : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Change</button>${move}${prev}`)
+      : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Edit</button>${move}${prev}<button class="btn sm" type="button" data-act="del" data-i="${i}">Delete</button>`;
     const pending = aliasState.pending && aliasState.pending.i === i;
     return `<li class="arow${a.overridden ? " overridden" : ""}"><div class="names"><span class="a">${esc(a.suwayomi_title)}</span><span class="arr" aria-hidden="true">→</span>
-      <span class="k">${esc(a.kavita_name)}</span>${tag}${over}</div>${pending ? confirmBox(aliasState.pending) : actions ? `<div class="acts">${actions}</div>` : ""}</li>`;
+      <span class="k">${esc(a.kavita_name)}</span>${tag}${over}${rankTag}</div>${pending ? confirmBox(aliasState.pending) : actions ? `<div class="acts">${actions}</div>` : ""}</li>`;
   }).join("");
   $("#alias-rows").innerHTML = rows || `<li class="alias-empty">No aliases yet. Most manga don't need one: Manga Manager already matches names that differ only in spelling, punctuation or tags like “(Official)”.</li>`;
 }
@@ -401,8 +461,7 @@ async function aliasSuggest() {
   aliasState.suggested = true;
   try {
     const s = await aliasCall("api/aliases/suggestions");
-    const opts = (xs) => xs.map(x => `<option value="${esc(x)}"></option>`).join("");
-    $("#alias-suwa-list").innerHTML = opts(s.suwayomi || []); $("#alias-kav-list").innerHTML = opts(s.kavita || []);
+    aliasState.suwa = s.suwayomi || []; aliasState.kav = s.kavita || [];
   } catch { aliasState.suggested = false; }
 }
 async function openAliases(prefillKavita) {
@@ -416,13 +475,21 @@ async function openAliases(prefillKavita) {
     }
   } catch (e) { aliasNote("Couldn’t load the aliases: " + e.message, "error"); }
 }
+combo($("#alias-suwa"), () => aliasState.suwa, (title) => {
+  // choosing a Suwayomi title fills in the matching Kavita series (ignoring tags like "(Official)") and the source type
+  const kav = $("#alias-kav");
+  if (!kav.value) { const k = looseKey(title); const m = k && aliasState.kav.find(x => looseKey(x) === k); if (m) kav.value = m; }
+  if ($("#alias-rank").value === "0") $("#alias-rank").value = String(detectRank(title));
+  kav.focus();
+});
+combo($("#alias-kav"), () => aliasState.kav);
 $("#alias-close").addEventListener("click", () => aliasDlg.close());
 aliasDlg.addEventListener("click", (e) => { if (e.target === aliasDlg) aliasDlg.close(); });   // a click on the backdrop closes it
 aliasDlg.addEventListener("close", () => load());   // show changed names right away
 $("#alias-cancel").addEventListener("click", () => { aliasReset(); aliasNote(""); });
 aliasForm.addEventListener("submit", async (e) => {
   e.preventDefault();
-  const body = { suwayomi_title: $("#alias-suwa").value, kavita_name: $("#alias-kav").value };
+  const body = { suwayomi_title: $("#alias-suwa").value, kavita_name: $("#alias-kav").value, rank: Number($("#alias-rank").value) };
   if (aliasState.editing) body.previous = aliasState.editing;
   try {
     aliasState.pending = null;
@@ -439,7 +506,7 @@ $("#alias-rows").addEventListener("click", async (e) => {
   if (act === "edit") {
     // Changing a config.yml alias adds one here that replaces it; config.yml itself is never edited.
     aliasState.editing = a.source === "dashboard" ? a.suwayomi_title : null;
-    $("#alias-suwa").value = a.suwayomi_title; $("#alias-kav").value = a.kavita_name;
+    $("#alias-suwa").value = a.suwayomi_title; $("#alias-kav").value = a.kavita_name; $("#alias-rank").value = String(a.rank || 0);
     $("#alias-save").textContent = "Save"; $("#alias-cancel").hidden = false;
     aliasNote(a.source === "config" ? "This saves a dashboard alias that replaces the one in config.yml." : "");
     $("#alias-kav").focus(); return;
@@ -450,6 +517,15 @@ $("#alias-rows").addEventListener("click", async (e) => {
           aliasNote(`Deleted the alias for “${a.suwayomi_title}”.`, "ok"); aliasReset(); }
     catch (err) { aliasNote(err.message, "error"); }
     return;
+  }
+  if (act === "preview") {
+    btn.disabled = true; aliasNote("Checking the waiting downloads…");
+    try {
+      const r = await aliasCall("api/aliases/preferred-preview", { suwayomi_title: a.suwayomi_title });
+      const detail = r.folders.map(f => `${f.folder}: ${f.files} file(s), ${f.replace} would replace${f.replace_chapters.length ? " (ch. " + f.replace_chapters.slice(0, 12).join(", ") + (f.replace_chapters.length > 12 ? "…" : "") + ")" : ""}${f.drop ? `, ${f.drop} dropped (already from a better source)` : ""}${f.flagged ? `, ${f.flagged} kept as duplicate (page count)` : ""}`).join(" · ");
+      aliasNote(`${r.message}${detail ? " " + detail : ""}`);
+    } catch (err) { aliasNote(err.message, "error"); }
+    btn.disabled = false; return;
   }
   if (act === "move") {
     // #16: preview first, then an inline confirmation; nobody has to put files back into the Suwayomi folder by hand

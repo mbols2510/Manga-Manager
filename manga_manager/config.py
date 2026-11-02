@@ -85,6 +85,12 @@ class Config:
     aliases: dict[str, str] = field(default_factory=dict)
     # aliases added on the dashboard (#12), loaded from the history database; they win over config.yml
     dashboard_aliases: dict[str, str] = field(default_factory=dict)
+    # source type set on an alias (casefolded Suwayomi title -> 1 official, 2 uncensored, 3 both)
+    dashboard_ranks: dict[str, int] = field(default_factory=dict)
+    # preferred sources: official / uncensored versions replace the same chapter from a lower-ranked source
+    src_enabled: bool = True
+    src_auto_detect: bool = True        # read (Official) / (Uncensored) from the Suwayomi title
+    src_min_page_pct: int = 60          # keep both files when the preferred one has fewer pages than this share
     # covers
     covers_enabled: bool = True
     covers_lock: bool = True
@@ -166,6 +172,16 @@ class Config:
 
     def _alias_fwd(self) -> dict[str, str]:
         return {k.casefold(): v for k, v in self.all_aliases().items()}
+
+    def source_rank(self, suwayomi_title: str) -> int:
+        """Source type of a Suwayomi title: set on its alias, else read from (Official) / (Uncensored) in the name."""
+        from .preferred import detect_rank
+        if not self.src_enabled:
+            return 0
+        explicit = self.dashboard_ranks.get(suwayomi_title.casefold(), 0)
+        if explicit:
+            return explicit
+        return detect_rank(suwayomi_title) if self.src_auto_detect else 0
 
     def display_title(self, suwayomi_title: str, kavita_name: str | None = None) -> str:
         """Name shown in notifications and on the dashboard: Kavita's name when known."""
