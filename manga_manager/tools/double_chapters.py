@@ -338,6 +338,10 @@ class DoubleChapters:
         root, target = os.path.realpath(self.manga_root), os.path.realpath(local_path)
         return target == root or target.startswith(root + os.sep)
 
+    def is_in_trash(self, path: str) -> bool:
+        root, target = os.path.realpath(self.trash_dir), os.path.realpath(path)
+        return target.startswith(root + os.sep)
+
     # -- state ------------------------------------------------------------------
     def load(self, key: str, default):
         return self.db.kv_get(NS, key, default)
@@ -513,6 +517,8 @@ class DoubleChapters:
             entry = trash.get(trash_id)
             if not entry:
                 raise ValueError("Unknown trash entry")
+            if not (self.is_safe_path(entry["originalPath"]) and self.is_in_trash(entry["trashPath"])):
+                raise ValueError("Trash entry points outside the manga or trash folder")
             if os.path.exists(entry["originalPath"]):
                 raise ValueError("A file already exists at the original location")
             os.makedirs(os.path.dirname(entry["originalPath"]), exist_ok=True)
@@ -534,6 +540,9 @@ class DoubleChapters:
                 if not entry:
                     continue
                 try:
+                    if not self.is_in_trash(entry["trashPath"]):
+                        log.warning("Not purging %s: outside the trash folder", entry["trashPath"])
+                        continue
                     if os.path.exists(entry["trashPath"]):
                         os.remove(entry["trashPath"])
                 except OSError as exc:

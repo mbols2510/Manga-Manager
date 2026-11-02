@@ -20,6 +20,19 @@ class ComicInfo:
     title: str | None = None
 
 
+MAX_COMICINFO = 2 * 1024 * 1024
+
+
+def _read_capped(zf, name: str) -> bytes:
+    """ComicInfo.xml is tiny; refuse anything big or with a DTD (entity expansion)."""
+    if zf.getinfo(name).file_size > MAX_COMICINFO:
+        raise ElementTree.ParseError("ComicInfo.xml is too large")
+    data = zf.read(name)
+    if b"<!DOCTYPE" in data[:4096].upper() or b"<!ENTITY" in data.upper():
+        raise ElementTree.ParseError("DTD / entities not allowed")
+    return data
+
+
 def read_comicinfo(path: Path) -> ComicInfo:
     """Read Series/Number/Title from ComicInfo.xml inside a CBZ. Never raises."""
     try:
@@ -27,7 +40,7 @@ def read_comicinfo(path: Path) -> ComicInfo:
             name = next((n for n in zf.namelist() if n.lower().rsplit("/", 1)[-1] == "comicinfo.xml"), None)
             if not name:
                 return ComicInfo()
-            root = ElementTree.fromstring(zf.read(name))
+            root = ElementTree.fromstring(_read_capped(zf, name))
     except (zipfile.BadZipFile, ElementTree.ParseError, OSError, KeyError) as exc:
         log.warning("Could not read ComicInfo.xml from %s: %s", path.name, exc)
         return ComicInfo()
@@ -132,7 +145,7 @@ def set_series_name(path: Path, series: str) -> bool:
             name = next((n for n in zf.namelist() if n.lower().rsplit("/", 1)[-1] == "comicinfo.xml"), None)
             if not name:
                 return False
-            root = ElementTree.fromstring(zf.read(name))
+            root = ElementTree.fromstring(_read_capped(zf, name))
             el = root.find("Series")
             if el is not None and (el.text or "").strip() == series:
                 return False

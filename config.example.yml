@@ -96,6 +96,7 @@ web:
                                      # pixels. Only needed when your image isn't 1400 x 1000.
     columns: auto            # auto = double-width card for a frame wider than tall; or 1 / 2
   allow_manual_run: true     # show the "Check for downloads" button
+  secure_cookie: ${SECURE_COOKIE:-false}   # true when you only reach the dashboard over https (login cookie gets the Secure flag)
   behind_proxy: false        # true when the dashboard is published through Cloudflare / a reverse proxy
   auth:
     enabled: ${AUTH_ENABLED:-true}   # login for every tab; the first sign-up creates the first account

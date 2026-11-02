@@ -17,6 +17,7 @@ class AppContext:
     settings: Settings
     jobs: JobRunner = field(default_factory=JobRunner)
     extras: dict[str, Any] = field(default_factory=dict)   # e.g. "kavita": KavitaClient
+    guard: Any = None                                       # guard.ConnectionGuard
 
     def ntfy_publish(self, topic: str, title: str, message: str, **kw) -> None:
         """Publish through the shared ntfy settings. Raises notify.NtfyError."""

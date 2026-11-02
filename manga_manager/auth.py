@@ -108,10 +108,26 @@ class UserStore:
             ok = False
         return name if ok else None
 
-    def create(self, username: str, password: str) -> None:
-        with self.db.connect() as c:
+    def create(self, username: str, password: str, first_only: bool = False) -> bool:
+        """Add an account. With first_only the insert happens only while no account exists at all
+        (checked under a lock, so two simultaneous first sign-ups can't both win)."""
+        with self.db.connect() as c, c.transaction():
+            c.execute("SELECT pg_advisory_xact_lock(727002)")
+            if first_only:
+                n = c.execute("SELECT COUNT(*) AS n FROM users").fetchone()["n"]
+                if n or self.config_users:
+                    return False
             c.execute("INSERT INTO users (username, password_hash) VALUES (%s,%s)",
                       (username, hash_password(password)))
+        return True
+
+    def is_admin(self, username: str) -> bool:
+        """Config.yml accounts and the first account created through sign-up may change settings."""
+        if username.casefold() in self.config_users:
+            return True
+        with self.db.connect() as c:
+            row = c.execute("SELECT username FROM users ORDER BY created_at, username LIMIT 1").fetchone()
+        return bool(row) and row["username"].casefold() == username.casefold()
 
     def count(self) -> int:
         with self.db.connect() as c:

@@ -110,6 +110,7 @@ class Config:
     web_allow_manual_run: bool = True
     web_mature_categories: list[str] = field(default_factory=lambda: ["Adult", "Hentai"])
     web_behind_proxy: bool = False
+    web_secure_cookie: bool = False   # only send the login cookie over https
     web_keep_days: int = 14         # #14: updates older than this are deleted; 0 = keep forever
     # frame drawn around mature covers (#7)
     frame_categories: list[str] = field(default_factory=lambda: ["Adult", "Hentai"])
@@ -297,6 +298,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         web_mature_categories=[str(c) for c in (web["mature_categories"] if "mature_categories" in web
                                                  else ["Adult", "Hentai"]) or []],
         web_behind_proxy=_as_bool(web.get("behind_proxy"), False),
+        web_secure_cookie=_as_bool(web.get("secure_cookie"), False),
         web_keep_days=int(web["keep_days"]) if web.get("keep_days") not in (None, "") else 14,
         frame_categories=[str(c) for c in (frame["categories"] if "categories" in frame
                                            else ["Adult", "Hentai"]) or []],

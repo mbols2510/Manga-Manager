@@ -23,6 +23,10 @@ from .scheduler import Scheduler
 log = logging.getLogger(__name__)
 
 # Reachable without logging in. /thumb also works with a signed link (for ntfy).
+# Settings hold the connection secrets and paths, so only an administrator (a config.yml account or the
+# first account) may open or change them.
+ADMIN_ENDPOINTS = {"core.settings_page", "core.settings_get", "core.settings_save", "core.settings_restart",
+                   "core.test_notification"}
 PUBLIC_ENDPOINTS = {"login", "signup", "health", "core.health", "static"}
 
 
@@ -45,6 +49,7 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         SESSION_COOKIE_NAME="manga_manager_session",
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE="Lax",
+        SESSION_COOKIE_SECURE=cfg.web_secure_cookie,
         PERMANENT_SESSION_LIFETIME=timedelta(days=cfg.auth_session_days),
     )
     if cfg.web_behind_proxy:
@@ -124,7 +129,7 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
     # ------------------------------------------------------------ access control
     @app.before_request
     def guard():
-        if request.method == "POST":
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             # Reject cross-site form posts (the session cookie is SameSite=Lax as well).
             origin = request.headers.get("Origin")
             if origin and origin != "null" and urlparse(origin).netloc != request.host:
@@ -139,6 +144,10 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
             return None
         user = session.get("user")
         if user and users.exists(user):
+            if request.endpoint in ADMIN_ENDPOINTS and not users.is_admin(user):
+                if request.path.startswith("/api/"):
+                    return jsonify({"error": "only an administrator can do this"}), 403
+                abort(403)
             return None
         session.pop("user", None)
         if request.path.startswith("/api/"):
@@ -196,7 +205,7 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         key = f"signup:{client_ip()}"
         if limiter.blocked(key):
             return auth_page("signup", "Too many attempts. Try again in 15 minutes.", username, 429)
-        if cfg.auth_signup_code and users.count() > 0 and not hmac.compare_digest(
+        if cfg.auth_signup_code and not hmac.compare_digest(
                 (request.form.get("code") or "").encode(), cfg.auth_signup_code.encode()):
             limiter.fail(key)
             return auth_page("signup", "That invite code isn't right.", username, 403)
@@ -206,7 +215,11 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         if problem:
             limiter.fail(key)
             return auth_page("signup", problem, username, 400)
-        users.create(username, request.form["password"])
+        limiter.fail(key)       # every sign-up counts, successful or not
+        created = users.create(username, request.form["password"],
+                               first_only=not cfg.auth_allow_signup)
+        if not created:
+            return auth_page("signup", "Sign-up is closed.", username, 403)
         log.info("New dashboard account %r created from %s", username, client_ip())
         session.clear()
         session.permanent = True

@@ -62,8 +62,11 @@ class RunLock:
 class Scheduler:
     def __init__(self, make_pipeline: Callable[[], Pipeline], history: History, interval_minutes: int,
                  run_on_start: bool = True, lock_path: Path | None = None,
-                 configured: Callable[[], bool] | None = None):
+                 configured: Callable[[], bool] | None = None,
+                 gate: Callable[[], str | None] | None = None):
         self.make_pipeline = make_pipeline
+        self.gate = gate
+        self._manual = False
         self.configured = configured
         self.history = history
         self.interval = interval_minutes * 60
@@ -90,6 +93,7 @@ class Scheduler:
         """Request a run as soon as possible. Returns False if one is already running."""
         if self.running:
             return False
+        self._manual = True        # an explicit request ignores the connection gate
         self._trigger.set()
         return True
 
@@ -133,6 +137,13 @@ class Scheduler:
             self.last_result = "Not configured yet: set Suwayomi and Kavita on the Settings page"
             log.info(self.last_result)
             return self.last_result
+        manual, self._manual = self._manual, False
+        if self.gate is not None and not manual:
+            reason = self.gate()
+            if reason:
+                self.last_result = f"Skipped: {reason}"
+                log.info("Run skipped. %s", reason)
+                return self.last_result
         if not self._run_lock.acquire(blocking=False):
             return ALREADY_RUNNING
         if not self._file_lock.acquire():

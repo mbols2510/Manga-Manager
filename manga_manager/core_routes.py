@@ -5,9 +5,7 @@ import logging
 import os
 import signal
 import threading
-import time
 
-import requests
 from flask import Blueprint, jsonify, render_template, request, session
 
 from . import __version__
@@ -27,54 +25,15 @@ def build_blueprint(ctx: AppContext, user_for_template) -> Blueprint:
             ctx.db.ping()
             return {"status": "ok", "version": __version__}
         except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "database": str(exc)[:200]}, 503
-
-    def check(name, fn):
-        started = time.monotonic()
-        try:
-            detail = fn()
-            return {"name": name, "state": "ok", "detail": detail, "ms": int((time.monotonic() - started) * 1000)}
-        except SkipCheck as exc:
-            return {"name": name, "state": "unset", "detail": str(exc), "ms": 0}
-        except Exception as exc:  # noqa: BLE001
-            return {"name": name, "state": "fail", "detail": str(exc)[:300], "ms": int((time.monotonic() - started) * 1000)}
-
-    class SkipCheck(Exception):
-        pass
-
-    def check_db():
-        ctx.db.ping()
-        return "connected"
-
-    def check_kavita():
-        cfg = ctx.cfg
-        if not (cfg.kavita_url and cfg.kavita_api_key):
-            raise SkipCheck("Kavita URL / API key not set")
-        from .kavita import KavitaClient
-        client = KavitaClient(cfg.kavita_url, cfg.kavita_api_key, cfg.kavita_plugin_name)
-        return f"{len(client.all_series())} series visible"
-
-    def check_suwayomi():
-        cfg = ctx.cfg
-        if not cfg.suwayomi_url:
-            raise SkipCheck("Suwayomi URL not set")
-        from .suwayomi import SuwayomiClient
-        client = SuwayomiClient(cfg.suwayomi_url, cfg.suwayomi_username, cfg.suwayomi_password)
-        return f"{len(client.library())} manga in library"
-
-    def check_ntfy():
-        cfg = ctx.cfg
-        if not cfg.ntfy_url:
-            raise SkipCheck("ntfy URL not set")
-        r = requests.get(cfg.ntfy_url + "/v1/health", timeout=8)
-        r.raise_for_status()
-        return "reachable"
+            log.warning("Health check: database error: %s", exc)
+            return {"status": "error"}, 503
 
     @bp.get("/api/health")
     def health_detail():
-        checks = [check("Database", check_db), check("Kavita", check_kavita),
-                  check("Suwayomi", check_suwayomi), check("ntfy", check_ntfy)]
-        return jsonify({"version": __version__, "checks": checks, "jobs": ctx.jobs.status()})
+        guard = ctx.guard
+        checks = guard.checks(force=True) if guard else []
+        return jsonify({"version": __version__, "checks": checks, "jobs": ctx.jobs.status(),
+                        "paused": guard.reason() if guard else None})
 
     @bp.post("/api/health/test-notification")
     def test_notification():

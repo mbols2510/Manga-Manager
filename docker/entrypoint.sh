@@ -7,6 +7,11 @@ PUID="${PUID:-1000}"
 PGID="${PGID:-1000}"
 umask "${UMASK:-022}"
 
+if [ "$PUID" = "0" ] || [ "$PGID" = "0" ]; then
+  echo "PUID/PGID must not be 0 (root). Use the id of your own user." >&2
+  exit 2
+fi
+
 mkdir -p /data /config
 if [ ! -f "${MANGA_MANAGER_CONFIG:-/config/config.yml}" ] && [ -w /config ]; then
   cp /app/config.example.yml /config/config.example.yml 2>/dev/null || true

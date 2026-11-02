@@ -8,6 +8,8 @@ services:
     image: ghcr.io/mbols2510/manga-manager:latest
     container_name: manga-manager
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     env_file: .env
     environment:
       PUID: ${PUID:-1000}

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import signal
 import sys
 from logging.handlers import TimedRotatingFileHandler
@@ -64,6 +65,7 @@ def prepare(cfg: Config) -> tuple[Database, Settings]:
     """Connect to Postgres and let the saved Settings override config.yml / .env."""
     db = open_database(cfg)
     settings = Settings(db)
+    from . import guard as _guard  # noqa: F401  registers the NAS settings
     from .tools import import_settings_only
     import_settings_only()           # registers every tab's settings
     settings.apply_to_config(cfg)
@@ -270,13 +272,17 @@ def title_lists(cfg: Config, suwayomi: SuwayomiClient, kavita: KavitaClient):
 def serve(cfg: Config, db: Database, settings: Settings) -> int:
     suwayomi, kavita, history, covers, make_pipeline = build(cfg, db)
     ctx = AppContext(cfg=cfg, db=db, settings=settings)
+    from .guard import ConnectionGuard
+    ctx.guard = ConnectionGuard(ctx)
+    ctx.jobs.gate = ctx.guard.reason
     if not cfg.dry_run and cfg.web_keep_days > 0:
         removed = history.prune_updates(cfg.web_keep_days)   # #14
         if removed:
             log.info("Removed %d dashboard update(s) older than %d days", removed, cfg.web_keep_days)
     scheduler = Scheduler(make_pipeline, history, cfg.interval_minutes, cfg.run_on_start,
                           lock_path=cfg.run_lock,
-                          configured=lambda: bool(cfg.suwayomi_url and cfg.kavita_url and cfg.kavita_api_key))
+                          configured=lambda: bool(cfg.suwayomi_url and cfg.kavita_url and cfg.kavita_api_key),
+                          gate=ctx.guard.reason)
 
     def shutdown(*_):
         log.info("Stopping")
@@ -289,6 +295,11 @@ def serve(cfg: Config, db: Database, settings: Settings) -> int:
 
     log.info("Manga Manager %s started: running every %d minute(s)%s", __version__, cfg.interval_minutes,
              " (DRY RUN)" if cfg.dry_run else "")
+    if cfg.web_enabled and not cfg.auth_enabled and cfg.web_host not in ("127.0.0.1", "localhost", "::1") \
+            and os.environ.get("WEB_INSECURE_NO_AUTH") != "1":
+        log.error("Refusing to start: web login is off while the dashboard listens on %s. Turn on web.auth in "
+                  "config.yml, or set WEB_INSECURE_NO_AUTH=1 if you really want an open dashboard.", cfg.web_host)
+        return 2
     if cfg.web_enabled:
         from waitress import serve as waitress_serve
         from .frames import FrameStore

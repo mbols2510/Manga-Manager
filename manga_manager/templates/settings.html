@@ -3,6 +3,7 @@
 <button class="btn sm" id="save" type="button">Save settings</button>
 {% endblock %}
 {% block content %}
+<p class="pill bad" id="paused" role="status" hidden></p>
 <section class="card" aria-labelledby="conn-h">
   <div class="row between">
     <h2 id="conn-h">Connections</h2>
@@ -58,6 +59,7 @@ async function save() {
 async function testConn() {
   $('#conn').innerHTML = '<p class="empty">Testing…</p>';
   const d = await api('api/health');
+  $('#paused').hidden = !d.paused; $('#paused').textContent = d.paused ? `Scheduled tasks are paused. ${d.paused}.` : '';
   const cls = {ok: 'ok', fail: 'bad', unset: 'mid'}, label = {ok: 'Connected', fail: 'Failed', unset: 'Not set'};
   $('#conn').innerHTML = d.checks.map(c => `<div class="row"><span class="pill ${cls[c.state]}">${label[c.state]}</span><strong>${esc(c.name)}</strong><span style="color:var(--ink-soft)">${esc(c.detail)}</span></div>`).join('');
   $('#jobs').innerHTML = Object.values(d.jobs).map(j => `<div class="row"><span class="pill ${j.last_error ? 'bad' : j.running ? 'mid' : 'ok'}">${j.running ? 'running' : j.last_error ? 'error' : 'idle'}</span><strong>${esc(j.name)}</strong><span style="color:var(--ink-soft)">last ${esc(j.last_finished || '—')} · next ${esc(j.next_run || '—')} ${esc(j.last_error)}</span></div>`).join('') || '<p class="empty">No jobs.</p>';

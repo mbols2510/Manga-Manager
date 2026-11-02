@@ -22,6 +22,7 @@ class Job:
     last_finished: float | None = None
     last_error: str = ""
     next_run: float | None = None
+    manual: bool = False
     _trigger: threading.Event = field(default_factory=threading.Event)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -35,6 +36,7 @@ class Job:
 class JobRunner:
     def __init__(self):
         self.jobs: dict[str, Job] = {}
+        self.gate: Callable[[], str | None] | None = None   # returns why scheduled work must wait
         self._stop = threading.Event()
 
     def add(self, name: str, fn: Callable[[], object], interval: Callable[[], float] | float,
@@ -57,6 +59,7 @@ class JobRunner:
         job = self.jobs.get(name)
         if not job or job.running:
             return False
+        job.manual = True          # an explicit request ignores the connection gate
         job._trigger.set()
         return True
 
@@ -64,6 +67,17 @@ class JobRunner:
         return {n: j.status() for n, j in self.jobs.items()}
 
     def _run(self, job: Job) -> None:
+        manual, job.manual = job.manual, False
+        if not manual and self.gate is not None:
+            try:
+                reason = self.gate()
+            except Exception as exc:  # noqa: BLE001 - never let the gate itself kill a job
+                reason = None
+                log.warning("Connection gate failed: %s", exc)
+            if reason:
+                job.last_error = f"Skipped: {reason}"
+                log.info("Job %s skipped. %s", job.name, reason)
+                return
         if not job._lock.acquire(blocking=False):
             return
         job.running, job.last_started, job.next_run = True, time.time(), None
