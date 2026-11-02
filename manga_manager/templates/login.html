@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ "Create an account" if mode == "signup" else "Log in" }} · {{ title }}</title>
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08080a">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23e4002b'/><text x='50' y='72' font-size='64' text-anchor='middle' font-family='sans-serif' font-weight='900' fill='white'>M</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* Night Shelf (2.7): the same pure black and red accent as the dashboard. Dark only, on purpose. */
+:root {
+  --ground: #08080a; --surface: #131317; --ink: #f4f4f7; --ink-soft: #9b9bab; --rule: #25252c;
+  --signal: #e4002b; --signal-ink: #ffffff; --warn: #ff8a80; --focus: #8c9eff;
+  --display: "Dela Gothic One", "Hiragino Sans", "Yu Gothic", system-ui, sans-serif;
+  --text: "Zen Kaku Gothic New", "Hiragino Sans", "Yu Gothic", "Segoe UI", system-ui, sans-serif;
+  color-scheme: dark; box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+*, *::before, *::after { box-sizing: inherit; }
+html, body { min-height: 100%; background: var(--ground); }
+body { margin: 0; color: var(--ink); font: 16px/1.5 var(--text); display: grid; place-items: center; min-height: 100vh; padding: 24px 16px; position: relative; }
+body::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 280px; color: #fff; opacity: .07; pointer-events: none;
+  background: radial-gradient(currentColor 1.4px, transparent 1.8px) 0 0 / 8px 8px; -webkit-mask: linear-gradient(#000, transparent); mask: linear-gradient(#000, transparent); }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+::selection { background: var(--signal); color: var(--signal-ink); }
+.wrap { position: relative; width: 100%; max-width: 400px; }
+main { background: var(--surface); border: 1px solid var(--rule); border-radius: 16px; padding: 28px; }
+.mk { width: 44px; height: 44px; border-radius: 12px; background: var(--signal); color: var(--signal-ink); display: grid; place-items: center; font: 400 1.375rem/1 var(--display); margin-bottom: 18px; }
+h1 { font: 400 1.75rem/1.1 var(--display); margin: 0 0 6px; }
+.sub { color: var(--ink-soft); margin: 0 0 18px; font-size: .9375rem; }
+label { display: block; font-weight: 700; font-size: .875rem; margin: 14px 0 6px; }
+input { width: 100%; height: 46px; font: 1rem var(--text); color: var(--ink); background: var(--ground);
+  border: 1px solid var(--rule); border-radius: 8px; padding: 0 12px; }
+input:focus { border-color: var(--ink-soft); outline: 0; }
+.hint { font-size: .8125rem; color: var(--ink-soft); margin: 6px 0 0; }
+button { margin-top: 22px; width: 100%; height: 48px; font: 700 1rem/1 var(--text); color: var(--signal-ink); background: var(--signal);
+  border: 1px solid var(--signal); border-radius: 999px; padding: 0 18px; cursor: pointer; }
+button:hover { filter: brightness(1.12); }
+.error { margin: 0 0 6px; padding: 10px 12px; border: 1px solid var(--warn); border-radius: 8px; background: var(--ground); color: var(--ink); font-size: .9375rem; }
+.switch { margin: 18px 0 0; font-size: .9375rem; color: var(--ink-soft); text-align: center; }
+.switch a { color: var(--ink); font-weight: 700; }
+footer { margin-top: 14px; font-size: .8125rem; color: var(--ink-soft); text-align: center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<main>
+  <div class="mk" aria-hidden="true">M</div>
+  <h1>{{ title }}</h1>
+  {% if mode == "signup" %}
+  <p class="sub">Create an account for the dashboard.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="signup{{ '?next=' ~ (next|urlencode) if next }}">
+    <label for="username">Username</label>
+    <input id="username" name="username" value="{{ username }}" autocomplete="username" required autofocus
+           pattern="[A-Za-z0-9_.\-]{3,32}" maxlength="32">
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="new-password" required minlength="10">
+    <p class="hint">At least 10 characters.</p>
+    <label for="confirm">Password again</label>
+    <input id="confirm" name="confirm" type="password" autocomplete="new-password" required minlength="10">
+    {% if need_code %}
+    <label for="code">Invite code</label>
+    <input id="code" name="code" autocomplete="off" required>
+    {% endif %}
+    <button type="submit">Create account</button>
+  </form>
+  <p class="switch">Already have an account? <a href="login">Log in</a></p>
+  {% else %}
+  <p class="sub">Log in to see the manga updates.</p>
+  {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+  <form method="post" action="login{{ '?next=' ~ (next|urlencode) if next }}">
+    <label for="username">Username</label>
+    <input id="username" name="username" value="{{ username }}" autocomplete="username" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Log in</button>
+  </form>
+  {% if allow_signup %}<p class="switch">No account yet? <a href="signup">Create one</a></p>{% endif %}
+  {% endif %}
+</main>
+<footer>Manga Manager {{ version }}</footer>
+</div>
+</body>
+</html>

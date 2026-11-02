@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08080a">
+<title>{% block title %}{{ page_title }}{% endblock %} · Manga Manager</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23e4002b'/><text x='50' y='72' font-size='64' text-anchor='middle' font-family='sans-serif' font-weight='900' fill='white'>M</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='tools.css') }}">
+{% block head %}{% endblock %}
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <div class="mk" aria-hidden="true">M</div>
+    <a class="rb" href="{{ url_for('index') }}"><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9H4z"/></svg>Updates</a>
+    {% include "_tools_nav.html" %}
+    <div class="sp"></div>
+    {% if user %}<div class="account"><div class="avatar" aria-hidden="true">{{ user[:1]|upper }}</div><span class="sr">Signed in as {{ user }}</span>
+      <form method="post" action="{{ url_for('logout') }}"><button type="submit">Log out</button></form></div>{% endif %}
+  </nav>
+  <div class="main">
+    <header class="top"><h1>{{ page_title }}</h1>{% block actions %}{% endblock %}</header>
+    {% block content %}{% endblock %}
+    <footer>Manga Manager {{ version }}</footer>
+  </div>
+</div>
+<nav class="bottom" aria-label="Main">
+  <a class="rb" href="{{ url_for('index') }}"><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9H4z"/></svg>Updates</a>
+  {% include "_tools_nav.html" %}
+</nav>
+{% block scripts %}{% endblock %}
+</body>
+</html>

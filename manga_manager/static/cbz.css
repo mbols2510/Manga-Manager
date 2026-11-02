@@ -1,0 +1,55 @@
+/* CBZ editor: builds on app.css (Night Shelf) and tools.css. */
+.cbz-lede { color: var(--ink-soft); max-width: 62ch; margin: 0 0 18px; }
+.cbz-lede code { color: var(--ink); background: var(--surface); padding: 1px 6px; border-radius: 6px; font-size: .875em; }
+.cbz-count { color: var(--ink-soft); font-weight: 700; font-size: .875rem; }
+.cbz-muted { color: var(--ink-soft); font-size: .8125rem; }
+.cbz-danger { color: var(--warn); }
+.cbz-none { padding: 22px 0 6px; text-align: center; }
+
+.cbz-drop { display: grid; justify-items: center; gap: 6px; padding: 30px 16px; margin-bottom: 8px; border: 1.5px dashed var(--rule); border-radius: 16px; background: var(--surface);
+  color: var(--ink-soft); text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
+.cbz-drop strong { color: var(--ink); }
+.cbz-drop small { font-size: .75rem; }
+.cbz-drop svg.i { width: 26px; height: 26px; color: var(--signal); }
+.cbz-drop:hover, .cbz-drop.over { border-color: var(--signal); background: var(--raise); }
+.cbz-progress { height: 4px; background: var(--rule); border-radius: 2px; margin: 0 0 16px; overflow: hidden; }
+.cbz-progress div { height: 100%; width: 0; background: var(--signal); }
+.cbz-drop + .cbz-progress[hidden] + .card { margin-top: 16px; }
+
+.cbz-scroll { overflow-x: auto; margin: 8px -4px 0; padding: 0 4px; }
+.cbz-table td, .cbz-table th { white-space: nowrap; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+.cbz-table td.cbz-check, .cbz-table th.cbz-check { width: 34px; }
+.cbz-table input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--signal); }
+.cbz-table tbody tr:hover { background: var(--raise); }
+.cbz-table tr.is-open { background: var(--raise); box-shadow: inset 3px 0 0 var(--signal); }
+.cbz-open { background: none; border: 0; padding: 2px 0; color: var(--ink); font-weight: 700; text-align: left; max-width: 100%; overflow: hidden; text-overflow: ellipsis; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+.cbz-open:hover { text-decoration-color: var(--signal); }
+.cbz-tag { font-size: .6875rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--rule); color: var(--ink-soft); }
+.cbz-tag.err { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+
+.cbz-addrow { margin-bottom: 12px; }
+select { background: var(--ground); color: var(--ink); border: 1px solid var(--rule); border-radius: 10px; padding: 8px 10px; font: inherit; max-width: 100%; }
+.cbz-ops { display: grid; gap: 10px; margin: 0 0 12px; }
+.cbz-op { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 12px 14px; border: 1px solid var(--rule); border-radius: 12px; background: var(--ground); }
+.cbz-op > strong { min-width: 112px; font-size: .8125rem; }
+.cbz-op label { display: flex; align-items: center; gap: 6px; color: var(--ink-soft); font-size: .8125rem; }
+.cbz-op input[type=text], .cbz-op input[type=number] { background: var(--surface); color: var(--ink); border: 1px solid var(--rule); border-radius: 8px; padding: 7px 10px; font: inherit; min-width: 0; }
+.cbz-op input[type=checkbox] { accent-color: var(--signal); }
+.cbz-op .rmop { margin-left: auto; }
+
+.cbz-preview td.old { color: var(--warn); text-decoration: line-through; }
+.cbz-preview td.new { color: var(--ok); }
+.cbz-preview td { white-space: normal; word-break: break-word; }
+
+.cbz-fname { margin: 0 0 14px; word-break: break-all; }
+.cbz-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.cbz-grid label { display: grid; gap: 4px; font-size: .75rem; font-weight: 700; color: var(--ink-soft); }
+.cbz-grid label.full { grid-column: 1 / -1; }
+.cbz-grid input, .cbz-grid textarea { width: 100%; background: var(--ground); color: var(--ink); border: 1px solid var(--rule); border-radius: 10px; padding: 9px 11px; font: 400 .9375rem var(--text); resize: vertical; }
+.cbz-grid input:focus, .cbz-grid textarea:focus { outline: 2px solid var(--focus); outline-offset: 1px; }
+.cbz-edfoot { position: sticky; bottom: 0; padding-top: 16px; margin-top: 8px; background: linear-gradient(transparent, var(--surface) 30%); }
+
+@media (max-width: 640px) {
+  .cbz-op > strong { min-width: 100%; }
+  .cbz-table td, .cbz-table th { max-width: 150px; }
+}

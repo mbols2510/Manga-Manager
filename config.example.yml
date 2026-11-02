@@ -1,0 +1,110 @@
+# Manga Manager configuration.
+# Copy this file to ./config/config.yml (next to docker-compose.yml) and adjust.
+# ${VAR} values are read from the environment / .env file, so secrets stay out of this file.
+# All paths are paths INSIDE the container (see the volumes in docker-compose.yml).
+
+schedule:
+  interval_minutes: 15        # how often to look for new downloads
+  run_on_start: true          # also run immediately when the container starts
+
+paths:
+  downloads: /suwayomi/downloads/mangas              # Suwayomi: <source>/<manga>/<chapter>.cbz
+  suwayomi_thumbnails: /suwayomi/downloads/thumbnails
+  data: /data                                        # history.db, thumbnail cache, logs
+  thumbnail_export: /thumbnail-export                # optional copy of every cover as <id>.png; "" to disable
+  settle_seconds: 120                                # only move a manga once its folder is untouched for this long
+  wait_for_whole_manga: true                         # true: move a manga in one go once its download is complete
+                                                     # false: move each chapter as soon as it's settle_seconds old
+  extensions: [".cbz"]
+
+suwayomi:
+  url: ${SUWAYOMI_URL}
+  username: ${SUWAYOMI_USERNAME}                     # leave empty if Suwayomi has no basic auth
+  password: ${SUWAYOMI_PASSWORD}
+  check_download_queue: true                         # also wait while Suwayomi still has chapters of the manga
+                                                     # queued or downloading (failed downloads don't block)
+
+kavita:
+  url: ${KAVITA_URL}                                 # how the container reaches Kavita on the NUC (API calls)
+  public_url: ""                                     # address the dashboard's "open in Kavita" links use, e.g.
+                                                     # https://kavita.example.com - set this when you open the
+                                                     # dashboard away from home; empty = same as url
+  api_key: ${KAVITA_API_KEY}                         # Kavita > User settings > API key / Auth keys
+  align_series_name: true                            # write Kavita's series name into new chapters when the
+                                                     # source renamed the manga, so they join the existing series
+  new_series_timeout: 300                            # seconds to wait for a new series to appear after a library scan
+  scan_delay: 60                                     # seconds between two scan requests to Kavita
+                                                     # (library and series scans); 0 = no pause
+
+# Suwayomi category -> Kavita library. The category is matched as a prefix, case-insensitive
+# (so "Regular" also matches "Regular - Weekly"), like the v1 script did.
+libraries:
+  - category: Regular
+    kavita_library_id: 1
+    path: /manga/Regular
+  - category: Adult
+    kavita_library_id: 2
+    path: /manga/Adult
+  - category: Hentai
+    kavita_library_id: 3
+    path: /manga/Hentai
+
+# Manual title mapping, for manga whose Suwayomi title is completely different from the Kavita
+# series name (e.g. after migrating to another source). Decorations like "(Official)", "[Digital]"
+# or "〘Official〙" are handled automatically and don't need an alias.
+# Run `docker compose run --rm manga-manager check` to see which Kavita series have no match.
+# You can also add, change and delete aliases on the dashboard (Aliases button); those are kept in
+# data/history.db, and replace an alias here for the same title.
+aliases: {}
+#  "Suwayomi title": "Kavita series name"
+
+covers:
+  enabled: true              # give every unlocked Kavita series its Suwayomi cover
+  lock: true                 # lock the cover in Kavita after setting it (also marks it as done)
+  write_cover_file: false    # ALSO drop cover.png in each series folder. Kavita itself ignores this file
+                             # (see docs/covers.md); useful only for other readers or future Kavita versions.
+
+ntfy:
+  enabled: ${NTFY_ENABLED:-false}
+  url: ${NTFY_URL}
+  topic: Manga_Updates
+  template: MangaUpdates     # server-side template, see ntfy/MangaUpdates.yml; "" = built-in text.
+                             # Not used while attach_cover is on: ntfy doesn't apply templates to messages
+                             # with an image, so Manga Manager then writes the same text itself.
+  token: ${NTFY_TOKEN}
+  delay_seconds: 10          # seconds between two notifications, so they don't all arrive at once
+  attach_icon: true          # use the cover as notification icon (needs web.public_url)
+  attach_cover: true         # also attach the cover as a large image (Android app; needs web.public_url,
+                             # and the phone must be able to reach that address). false = use the
+                             # server-side template again, with the cover as small icon only
+  chapter_status: true       # "Chapter: 7 (New)" / "(Replaced)"; false = plain "Chapter: 7" as before
+
+web:
+  enabled: true
+  port: 8080                 # port inside the container; map it in docker-compose.yml
+  title: Manga updates
+  public_url: ""             # e.g. http://192.168.1.10:8080 - enables ntfy click-through + icons
+  blur_categories: [Adult, Hentai]   # [] = never blur
+  mature_categories: [Adult, Hentai] # get an "18+" badge on their covers
+  keep_days: 14              # updates older than this are removed from the dashboard; 0 = keep all
+  frame:                     # decorative frame around covers of these categories (see README)
+    categories: [Adult, Hentai]      # [] = no frames
+                             # Every image in config/frames/mature/ is a frame (created on first start);
+                             # one is picked at random per cover. adult/ and hentai/ folders hold frames
+                             # for one category only.
+    # window: [50, 400, 50, 400]     # where the cover sits in YOUR image: top, right, bottom, left in
+                                     # pixels. Only needed when your image isn't 1400 x 1000.
+    columns: auto            # auto = double-width card for a frame wider than tall; or 1 / 2
+  allow_manual_run: true     # show the "Check for downloads" button
+  behind_proxy: false        # true when the dashboard is published through Cloudflare / a reverse proxy
+  auth:
+    enabled: ${AUTH_ENABLED:-true}   # login for every tab; the first sign-up creates the first account
+    users: {}                # username: "hash" - make a hash with: docker compose run --rm manga-manager hash-password
+    #  alice: "scrypt:32768:8:1$..."
+    allow_signup: false      # true = keep the "Create account" page open after the first account
+    signup_code: ${SIGNUP_CODE:-}   # invite code the sign-up page asks for; empty = anyone can sign up
+    secret_key: ${WEB_SECRET_KEY:-} # signs logins and cover links; empty = generated once in /data/secret_key
+    session_days: 30         # how long you stay logged in
+
+log_level: INFO              # DEBUG for troubleshooting
+dry_run: false               # true = log what would happen, change nothing

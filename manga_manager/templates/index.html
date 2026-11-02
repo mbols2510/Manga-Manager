@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#08080a">
+<title>{{ title }}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23e4002b'/><text x='50' y='72' font-size='64' text-anchor='middle' font-family='sans-serif' font-weight='900' fill='white'>M</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Dela+Gothic+One&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+<div class="shell">
+  <nav class="rail" aria-label="Main">
+    <div class="mk" aria-hidden="true">M</div>
+    <a class="rb" href="{{ url_for('index') }}" aria-current="page"><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9H4z"/></svg>Updates</a>
+    <button class="rb" type="button" data-act="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Search</button>
+    <button class="rb" type="button" data-act="aliases"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h6"/></svg>Aliases</button>
+    {% if allow_run %}<button class="rb" type="button" data-act="run"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>Run</button>{% endif %}
+    {% include "_tools_nav.html" %}
+    <div class="sp"></div>
+    {% if user %}<div class="account"><div class="avatar" aria-hidden="true">{{ user[:1]|upper }}</div><span class="sr">Signed in as {{ user }}</span>
+      <form method="post" action="logout"><button type="submit">Log out</button></form></div>{% endif %}
+  </nav>
+
+  <div class="main">
+    <header class="top">
+      <h1>{{ title }}</h1>
+      <label class="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="q" type="search" placeholder="Search titles" aria-label="Search titles" autocomplete="off"><kbd aria-hidden="true">/</kbd></label>
+    </header>
+    <p class="summary" id="summary">Loading…</p>
+
+    <section class="spot" id="spot" hidden aria-label="Newest series"></section>
+
+    <div class="status" id="status" role="status" aria-live="polite">
+      <span class="dot" aria-hidden="true"></span><span id="runstate"></span>
+      {% if allow_run %}<button class="btn sm" id="runbtn" type="button"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>Check for downloads</button>{% endif %}
+    </div>
+
+    <div class="bar" role="search">
+      <button class="ch" type="button" data-lib="" aria-pressed="true">All libraries</button>
+      {% for c in categories %}<button class="ch" type="button" data-lib="{{ c }}" aria-pressed="false">{{ c }}</button>{% endfor %}
+      <span class="vsep" aria-hidden="true"></span>
+      <button class="ch" type="button" data-kind="" aria-pressed="true">Everything</button>
+      <button class="ch" type="button" data-kind="new" aria-pressed="false">New series</button>
+      <button class="ch" type="button" data-kind="updated" aria-pressed="false">New chapters</button>
+      {% if blur %}<label class="reveal"><input type="checkbox" id="reveal"> Show all covers</label>{% endif %}
+      <div class="vt"><button type="button" id="dense0" aria-label="Comfortable covers" aria-pressed="true"><svg class="i" viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg></button>
+        <button type="button" id="dense1" aria-label="Compact covers" aria-pressed="false"><svg class="i" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/></svg></button></div>
+    </div>
+    <div class="seen" id="seen" hidden><span id="seen-n"></span><button type="button" id="seen-btn">Mark as seen</button></div>
+    <div class="legend" aria-hidden="true"><ul class="chapters"><li>Ch. 5</li></ul> new chapter
+      <ul class="chapters"><li class="replaced">Ch. 7</li></ul> replaced an existing file
+      <ul class="chapters"><li class="duplicate">Ch. 8</li></ul> duplicate, added next to an existing file</div>
+
+    <main id="list" aria-live="polite"></main>
+    <button class="btn" id="more" type="button" hidden>Show older updates</button>
+    <footer>Manga Manager {{ version }}</footer>
+  </div>
+</div>
+
+<nav class="bottom" aria-label="Main">
+  <a class="rb" href="{{ url_for('index') }}" aria-current="page"><svg class="i" viewBox="0 0 24 24"><path d="M4 11 12 4l8 7v9H4z"/></svg>Updates</a>
+  <button class="rb" type="button" data-act="search"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>Search</button>
+  <button class="rb" type="button" data-act="aliases"><svg class="i" viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h6"/></svg>Aliases</button>
+  {% if allow_run %}<button class="rb" type="button" data-act="run"><svg class="i" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>Run</button>{% endif %}
+    {% include "_tools_nav.html" %}
+  {% if user %}<form method="post" action="logout" style="display:contents"><button class="rb" type="submit"><svg class="i" viewBox="0 0 24 24"><path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/></svg>Log out</button></form>{% endif %}
+</nav>
+
+<dialog class="panel" id="aliases" aria-labelledby="aliases-title">
+  <div class="panel-body">
+    <div class="panel-head">
+      <h2 id="aliases-title">Aliases</h2>
+      <button class="btn sm" type="button" id="alias-close">Close</button>
+    </div>
+    <p class="intro">When Suwayomi and Kavita use completely different names for a manga, tell Manga Manager which Kavita
+      series a Suwayomi title belongs to. The Kavita name is also used in notifications and on this page.
+      Changes apply from the next run. <strong>Move chapters</strong> moves chapters that were already filed under the Suwayomi name into the Kavita series.</p>
+    <form class="alias-form" id="alias-form" hidden autocomplete="off">
+      <label>Suwayomi title<input id="alias-suwa" list="alias-suwa-list" required maxlength="300" placeholder="Name in Suwayomi"></label>
+      <label>Kavita series<input id="alias-kav" list="alias-kav-list" required maxlength="300" placeholder="Name in Kavita"></label>
+      <div class="actions">
+        <button class="btn sig" type="submit" id="alias-save">Add alias</button>
+        <button class="btn" type="button" id="alias-cancel" hidden>Cancel</button>
+      </div>
+      <datalist id="alias-suwa-list"></datalist><datalist id="alias-kav-list"></datalist>
+    </form>
+    <p class="alias-note" id="alias-readonly" hidden>You can look at the aliases, but only accounts listed in config.yml can change them.</p>
+    <p class="alias-msg" id="alias-msg" role="status" aria-live="polite"></p>
+    <ul class="alias-list" id="alias-rows"></ul>
+  </div>
+</dialog>
+
+<script>
+const BLUR = {{ blur|tojson }};
+const MATURE = {{ mature|tojson }};
+const FRAMES = {{ frames|tojson }};
+const KEEP_DAYS = {{ keep_days|tojson }};
+const PAGE = 60;
+const state = { offset: 0, total: 0, loading: false, lastDay: null, lib: "", kind: "" };
+const $ = (s) => document.querySelector(s);
+const list = $("#list");
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function catClass(c) { return "cat-" + String(c).toLowerCase().replace(/[^a-z0-9]+/g, "-"); }
+
+function dayKey(d) { return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); }
+function dayLabel(d) {
+  const today = new Date(); const y = new Date(); y.setDate(today.getDate() - 1);
+  const date = d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: d.getFullYear() !== today.getFullYear() ? "numeric" : undefined });
+  if (dayKey(d) === dayKey(today)) return ["Today", date];
+  if (dayKey(d) === dayKey(y)) return ["Yesterday", date];
+  return [d.toLocaleDateString(undefined, { weekday: "long" }), d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: d.getFullYear() !== today.getFullYear() ? "numeric" : undefined })];
+}
+
+// "12, 13, 14, 16" -> ["12–14", "16"]
+function chapterChips(chs) {
+  const out = []; let start = null, prev = null;
+  const flush = () => { if (start === null) return; out.push(start === prev ? String(start) : start + "–" + prev); };
+  for (const c of chs) {
+    const n = Number(c);
+    if (Number.isInteger(n) && prev !== null && Number.isInteger(prev) && n === prev + 1) { prev = n; continue; }
+    flush();
+    if (Number.isInteger(n)) { start = prev = n; } else { start = null; prev = null; out.push(String(c)); }
+  }
+  flush();
+  return out;
+}
+
+// Last time the visitor looked at the list (this browser only): updates newer than that are "new since your last visit".
+function lastSeen() { const v = Number(store.get("mm-last-seen")); return Number.isFinite(v) && v > 0 ? v : null; }
+
+function card(item) {
+  const d = new Date(item.created_at);
+  const blurred = BLUR.includes(String(item.category).toLowerCase()) && !$("#reveal")?.checked;
+  const mature = MATURE.includes(String(item.category).toLowerCase());
+  const rep = new Set((item.replaced || []).map(String));
+  const dup = new Set((item.duplicates || []).map(String));
+  const kind = (c) => rep.has(String(c)) ? "replaced" : dup.has(String(c)) ? "duplicate" : "new";
+  // Chapters stay in order; a range only spans chapters with the same status (new / replaced / duplicate).
+  const chips = [];
+  let run = [];
+  item.chapters.forEach((c, i) => {
+    run.push(c);
+    const k = kind(c), next = item.chapters[i + 1];
+    if (next === undefined || kind(next) !== k) {
+      chips.push(...chapterChips(run).map(x => [x, k])); run = [];
+    }
+  });
+  const chip = ([c, k]) => k === "replaced"
+      ? `<li class="replaced" title="Replaced an existing file">Ch. ${esc(c)}<span class="sr"> (replaced)</span></li>`
+      : k === "duplicate"
+      ? `<li class="duplicate" title="Duplicate: added next to an existing file for this chapter">Ch. ${esc(c)}<span class="sr"> (duplicate)</span></li>`
+      : `<li>Ch. ${esc(c)}</li>`;
+  const shown = chips.slice(0, 6).map(chip).join("") + (chips.length > 6 ? `<li>+${chips.length - 6}</li>` : "");
+  const img = item.thumbnail
+    ? `<img src="${esc(item.thumbnail)}" alt="" loading="lazy" onerror="this.remove()">`
+    : "";
+  const href = item.kavita_url ? ` href="${esc(item.kavita_url)}" target="_blank" rel="noopener"` : "";
+  // A blurred cover is a plain box with a reveal button; the title stays a link.
+  const tag = item.kavita_url && !blurred ? "a" : "div";
+  const coverHref = tag === "a" ? href : "";
+  const cover = `<${tag} class="cover${blurred ? " blurred" : ""}" data-blur="${blurred ? 1 : 0}"${coverHref} aria-label="${esc(item.title)}">
+      <span class="plate" aria-hidden="true"><span>${esc(item.title)}</span></span>${img}
+      ${item.is_new ? '<span class="sticker">New series</span>' : ""}
+      ${mature ? `<span class="age" title="${esc(item.category)}: 18+">18+</span>` : ""}
+      ${blurred ? '<button class="veil" type="button">Tap to show cover</button>' : ""}
+    </${tag}>`;
+  // #13: a random frame from the category's frames, picked again every time the page draws the card
+  const options = FRAMES[String(item.category).toLowerCase()] || [];
+  const fr = options.length ? options[Math.floor(Math.random() * options.length)] : null;
+  const framed = fr
+    ? `<div class="framed" style="--box:${fr.box};--fl:${fr.left};--ft:${fr.top};--fw:${fr.width};--fh:${fr.height}">${cover}<img class="frame" src="${esc(fr.url)}" alt="" aria-hidden="true" draggable="false"></div>`
+    : cover;
+  const seen = lastSeen();
+  const fresh = seen !== null && d.getTime() > seen;
+  return `<article class="card ${catClass(item.category)}${fr && fr.span > 1 ? " span-2" : ""}${fresh ? " fresh" : ""}" data-t="${d.getTime()}">
+    ${framed}
+    <h3>${item.kavita_url ? `<a${href}>${esc(item.title)}</a>` : esc(item.title)}${fresh ? '<span class="sr"> (new since your last visit)</span>' : ""}</h3>
+    <div class="meta"><i aria-hidden="true"></i><span class="cat">${mature ? '<span class="mature">18+</span> ' : ""}${esc(item.category)}</span><span>${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</span></div>
+    <ul class="chapters" aria-label="Chapters">${shown}</ul>
+  </article>`;
+}
+
+function render(items, append) {
+  if (!append) { list.innerHTML = ""; state.lastDay = null; }
+  let grid = append ? list.querySelector(".day:last-child .grid") : null;
+  for (const item of items) {
+    const d = new Date(item.created_at);
+    const key = dayKey(d);
+    if (key !== state.lastDay) {
+      const [big, small] = dayLabel(d);
+      const sec = document.createElement("section");
+      sec.className = "day";
+      sec.innerHTML = `<div class="dh"><h2>${esc(big)}</h2><span>${esc(small)}</span></div><div class="grid"></div>`;
+      list.appendChild(sec);
+      grid = sec.querySelector(".grid");
+      state.lastDay = key;
+    }
+    grid.insertAdjacentHTML("beforeend", card(item));
+  }
+  if (!append && !items.length) {
+    const filtered = $("#q").value || state.lib || state.kind;
+    list.innerHTML = filtered
+      ? `<div class="empty"><h2>No matches</h2><p>No updates match these filters. Clear the search or pick “All libraries” and “Everything”.</p></div>`
+      : `<div class="empty"><h2>Nothing moved yet</h2><p>Manga show up here after a run moves new chapters from Suwayomi into Kavita.</p></div>`;
+  }
+}
+
+// The newest new series gets a spotlight, with the cover's own colour behind it. Never a mature or blurred category.
+function avgColor(img) {
+  try {
+    const c = document.createElement("canvas"); c.width = c.height = 1;
+    const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(img, 0, 0, 1, 1);
+    const [r, g, b] = x.getImageData(0, 0, 1, 1).data; return `rgb(${r},${g},${b})`;
+  } catch { return null; }
+}
+function spotlight(items) {
+  const el = $("#spot");
+  const pick = items.find(i => i.is_new && i.thumbnail && !BLUR.includes(String(i.category).toLowerCase()) && !MATURE.includes(String(i.category).toLowerCase()));
+  if (!pick || state.lib || state.kind || $("#q").value) { el.hidden = true; el.innerHTML = ""; return; }
+  const n = pick.chapters.length;
+  const when = new Date(pick.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  el.className = "spot " + catClass(pick.category);
+  el.innerHTML = `<div class="cover" style="--cat:var(--${esc(String(pick.category).toLowerCase())}, var(--regular))"><span class="plate" aria-hidden="true"><span>${esc(pick.title)}</span></span>
+      <img src="${esc(pick.thumbnail)}" alt="" crossorigin="anonymous" onerror="this.remove()"><span class="sticker">New series</span></div>
+    <div class="tx"><span class="sticker">New series</span><h2>${esc(pick.title)}</h2>
+      <p>${n} chapter${n === 1 ? "" : "s"} just landed in ${esc(pick.category)}, at ${esc(when)}.</p>
+      <div class="acts">${pick.kavita_url ? `<a class="btn sig" href="${esc(pick.kavita_url)}" target="_blank" rel="noopener">Open in Kavita</a>` : ""}
+        <button class="btn opt" type="button" id="spot-alias">Add alias</button></div></div>`;
+  el.querySelector(".cover .sticker").remove();    // the sticker sits beside the title, not on the small cover
+  el.hidden = false;
+  const img = el.querySelector("img");
+  if (img) img.addEventListener("load", () => { const c = avgColor(img); if (c) el.style.setProperty("--sb", c); });
+  $("#spot-alias").addEventListener("click", () => openAliases(pick.title));
+}
+
+function seenNotice() {
+  const seen = lastSeen(), box = $("#seen");
+  if (seen === null) { store.set("mm-last-seen", String(Date.now())); box.hidden = true; return; }
+  const n = list.querySelectorAll(".card.fresh").length;
+  box.hidden = !(n > 0 && !state.lib && !state.kind && !$("#q").value);
+  $("#seen-n").textContent = `${n} new since your last visit`;
+}
+
+async function load(append = false) {
+  if (state.loading) return;
+  state.loading = true;
+  if (!append) state.offset = 0;
+  const p = new URLSearchParams({ limit: PAGE, offset: state.offset });
+  const q = $("#q").value.trim(); if (q) p.set("q", q);
+  if (state.lib) p.set("category", state.lib);
+  if (state.kind) p.set("kind", state.kind);
+  try {
+    const res = await fetch("api/updates?" + p);
+    if (res.status === 401) { location.href = "login"; return; }
+    const data = await res.json();
+    render(data.items, append);
+    if (!append) { spotlight(data.items); seenNotice(); }
+    state.offset += data.items.length; state.total = data.total;
+    $("#more").hidden = state.offset >= state.total;
+  } catch (e) {
+    list.innerHTML = `<div class="empty"><h2>Can’t load updates</h2><p>The dashboard couldn’t reach its API (${esc(e.message)}). Check that the container is running.</p></div>`;
+  } finally { state.loading = false; }
+}
+
+function fmtRun(run, sched) {
+  if (sched?.running) return "Checking for downloads…";
+  if (!run) return "No runs yet";
+  const when = new Date(run.finished_at || run.started_at).toLocaleString(undefined, { dateStyle: "short", timeStyle: "short" });
+  const next = sched?.next_run ? ", next run at " + new Date(sched.next_run).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
+  if (run.status === "error") return `Last run failed ${when}: ${run.message}`;
+  return `Last run ${when}${next}`;
+}
+
+async function status() {
+  try {
+    const s = await (await fetch("api/status")).json();
+    const n = (x) => Number(x).toLocaleString();
+    $("#summary").innerHTML = s.updates
+      ? `<strong>${n(s.chapters)}</strong> chapters moved across <strong>${n(s.titles)}</strong> titles, including <strong>${n(s.new_series)}</strong> new series${KEEP_DAYS > 0 ? ` in the last ${n(KEEP_DAYS)} days` : ""}.`
+      : "Every manga added to or updated in Kavita appears here.";
+    $("#runstate").textContent = fmtRun(s.last_run, s.scheduler);
+    const box = $("#status");
+    box.classList.toggle("running", !!s.scheduler?.running);
+    box.classList.toggle("error", s.last_run?.status === "error" && !s.scheduler?.running);
+    document.querySelectorAll("#runbtn, [data-act=run]").forEach(b => { b.disabled = !!s.scheduler?.running; });
+    return s;
+  } catch { return null; }
+}
+
+// ---------- events ----------
+let t; $("#q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(() => load(), 250); });
+function pick(attr, value) {
+  state[attr] = value;
+  document.querySelectorAll(`[data-${attr === "lib" ? "lib" : "kind"}]`).forEach(b => b.setAttribute("aria-pressed", String(b.dataset[attr === "lib" ? "lib" : "kind"] === value)));
+  load();
+}
+document.querySelectorAll("[data-lib]").forEach(b => b.addEventListener("click", () => pick("lib", b.dataset.lib)));
+document.querySelectorAll("[data-kind]").forEach(b => b.addEventListener("click", () => pick("kind", b.dataset.kind)));
+$("#more").addEventListener("click", () => load(true));
+new IntersectionObserver((e) => { if (e[0].isIntersecting && !$("#more").hidden) load(true); }).observe($("#more"));
+list.addEventListener("click", (e) => {
+  const veil = e.target.closest(".veil");
+  if (veil) { e.preventDefault(); veil.closest(".cover").classList.remove("blurred"); veil.remove(); }
+});
+const reveal = $("#reveal");
+if (reveal) {
+  reveal.checked = store.get("mm-reveal") === "1";
+  reveal.addEventListener("change", () => { store.set("mm-reveal", reveal.checked ? "1" : "0"); load(); });
+}
+function setDense(on, save = true) {
+  document.body.classList.toggle("dense", on);
+  $("#dense0").setAttribute("aria-pressed", String(!on)); $("#dense1").setAttribute("aria-pressed", String(on));
+  if (save) store.set("mm-dense", on ? "1" : "0");
+}
+setDense(store.get("mm-dense") === "1", false);
+$("#dense0").addEventListener("click", () => setDense(false)); $("#dense1").addEventListener("click", () => setDense(true));
+$("#seen-btn").addEventListener("click", () => {
+  store.set("mm-last-seen", String(Date.now()));
+  list.querySelectorAll(".card.fresh").forEach(c => c.classList.remove("fresh"));
+  $("#seen").hidden = true;
+});
+
+async function startRun() {
+  document.querySelectorAll("#runbtn, [data-act=run]").forEach(b => { b.disabled = true; });
+  const r = await fetch("api/run", { method: "POST" }).then(r => r.json()).catch(() => null);
+  $("#runstate").textContent = r?.message || "Couldn’t start a run";
+  const poll = setInterval(async () => {
+    const s = await status();
+    if (s && !s.scheduler?.running) { clearInterval(poll); load(); }
+  }, 4000);
+}
+const runbtn = $("#runbtn");
+if (runbtn) runbtn.addEventListener("click", startRun);
+function focusSearch() { window.scrollTo({ top: 0, behavior: "smooth" }); $("#q").focus({ preventScroll: true }); }
+document.querySelectorAll("[data-act]").forEach(b => b.addEventListener("click", () => {
+  const a = b.dataset.act;
+  if (a === "search") focusSearch(); else if (a === "aliases") openAliases(); else if (a === "run") startRun();
+}));
+document.addEventListener("keydown", (e) => {
+  if (e.key === "/" && !e.metaKey && !e.ctrlKey && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) && !$("#aliases").open) { e.preventDefault(); focusSearch(); }
+});
+
+// ---------- aliases (#12) and moving chapters (#16) ----------
+const aliasDlg = $("#aliases"), aliasForm = $("#alias-form"), aliasMsg = $("#alias-msg");
+const aliasState = { editing: null, items: [], suggested: false, pending: null };
+function aliasNote(text, kind = "") { aliasMsg.textContent = text; aliasMsg.className = "alias-msg" + (kind ? " " + kind : ""); }
+function aliasReset() {
+  aliasState.editing = null; aliasForm.reset();
+  $("#alias-save").textContent = "Add alias"; $("#alias-cancel").hidden = true;
+}
+function confirmBox(p) {
+  if (p.kind === "delete") return `<div class="confirm" role="group" aria-label="Confirm delete"><span>Delete the alias for “${esc(p.title)}”?</span>
+      <div class="acts"><button class="btn sm" type="button" data-act="del-go">Delete alias</button><button class="btn sm" type="button" data-act="cancel">Cancel</button></div></div>`;
+  const total = p.plan.moves.reduce((n, m) => n + m.files, 0), repl = p.plan.moves.reduce((n, m) => n + m.replaced, 0);
+  return `<div class="confirm" role="group" aria-label="Confirm moving chapters"><span>${esc(p.plan.message)}</span>
+      <span class="sub">${p.plan.moves.map(m => `${esc(m.from)} → ${esc(m.to)}: ${m.files} file(s)`).join(" · ")}${repl ? ` · ${repl} replace an existing file` : ""} · Kavita is rescanned afterwards</span>
+      <div class="acts"><button class="btn sig sm" type="button" data-act="move-go">Move ${total} file${total === 1 ? "" : "s"} and rescan</button><button class="btn sm" type="button" data-act="cancel">Cancel</button></div></div>`;
+}
+function aliasRender(data) {
+  if (data) aliasState.items = data.items;
+  const canEdit = data ? data.can_edit : aliasState.canEdit;
+  aliasState.canEdit = canEdit;
+  aliasForm.hidden = !canEdit; $("#alias-readonly").hidden = canEdit;
+  const rows = aliasState.items.map((a, i) => {
+    const fromCfg = a.source === "config";
+    const tag = fromCfg ? `<span class="src" title="Set in config.yml">config.yml</span>` : "";
+    const over = a.overridden ? `<span class="src" title="An alias added on the dashboard replaces this one">replaced</span>` : "";
+    const move = `<button class="btn sm" type="button" data-act="move" data-i="${i}" title="Move chapters filed under the Suwayomi name into the Kavita series">Move chapters</button>`;
+    let actions = "";
+    if (canEdit) actions = fromCfg
+      ? (a.overridden ? "" : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Change</button>${move}`)
+      : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Edit</button>${move}<button class="btn sm" type="button" data-act="del" data-i="${i}">Delete</button>`;
+    const pending = aliasState.pending && aliasState.pending.i === i;
+    return `<li class="arow${a.overridden ? " overridden" : ""}"><div class="names"><span class="a">${esc(a.suwayomi_title)}</span><span class="arr" aria-hidden="true">→</span>
+      <span class="k">${esc(a.kavita_name)}</span>${tag}${over}</div>${pending ? confirmBox(aliasState.pending) : actions ? `<div class="acts">${actions}</div>` : ""}</li>`;
+  }).join("");
+  $("#alias-rows").innerHTML = rows || `<li class="alias-empty">No aliases yet. Most manga don't need one: Manga Manager already matches names that differ only in spelling, punctuation or tags like “(Official)”.</li>`;
+}
+async function aliasCall(url, body) {
+  const res = await fetch(url, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (res.status === 401) { location.href = "login"; throw new Error("login required"); }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+async function aliasSuggest() {
+  if (aliasState.suggested) return;
+  aliasState.suggested = true;
+  try {
+    const s = await aliasCall("api/aliases/suggestions");
+    const opts = (xs) => xs.map(x => `<option value="${esc(x)}"></option>`).join("");
+    $("#alias-suwa-list").innerHTML = opts(s.suwayomi || []); $("#alias-kav-list").innerHTML = opts(s.kavita || []);
+  } catch { aliasState.suggested = false; }
+}
+async function openAliases(prefillKavita) {
+  aliasNote("Loading…"); aliasReset(); aliasState.pending = null;
+  if (!aliasDlg.open) aliasDlg.showModal();
+  try {
+    aliasRender(await aliasCall("api/aliases")); aliasNote("");
+    if (!aliasForm.hidden) {
+      aliasSuggest();
+      if (prefillKavita) { $("#alias-kav").value = prefillKavita; $("#alias-suwa").focus(); }
+    }
+  } catch (e) { aliasNote("Couldn’t load the aliases: " + e.message, "error"); }
+}
+$("#alias-close").addEventListener("click", () => aliasDlg.close());
+aliasDlg.addEventListener("click", (e) => { if (e.target === aliasDlg) aliasDlg.close(); });   // a click on the backdrop closes it
+aliasDlg.addEventListener("close", () => load());   // show changed names right away
+$("#alias-cancel").addEventListener("click", () => { aliasReset(); aliasNote(""); });
+aliasForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const body = { suwayomi_title: $("#alias-suwa").value, kavita_name: $("#alias-kav").value };
+  if (aliasState.editing) body.previous = aliasState.editing;
+  try {
+    aliasState.pending = null;
+    aliasRender(await aliasCall("api/aliases", body));
+    aliasNote(`Saved: “${body.suwayomi_title.trim()}” → “${body.kavita_name.trim()}”. Used from the next run.`, "ok");
+    aliasReset(); $("#alias-suwa").focus();
+  } catch (err) { aliasNote(err.message, "error"); }
+});
+$("#alias-rows").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button[data-act]"); if (!btn) return;
+  const act = btn.dataset.act;
+  const a = aliasState.items[Number(btn.dataset.i)] || (aliasState.pending && aliasState.items[aliasState.pending.i]);
+  if (act === "cancel") { aliasState.pending = null; aliasRender(); aliasNote(""); return; }
+  if (act === "edit") {
+    // Changing a config.yml alias adds one here that replaces it; config.yml itself is never edited.
+    aliasState.editing = a.source === "dashboard" ? a.suwayomi_title : null;
+    $("#alias-suwa").value = a.suwayomi_title; $("#alias-kav").value = a.kavita_name;
+    $("#alias-save").textContent = "Save"; $("#alias-cancel").hidden = false;
+    aliasNote(a.source === "config" ? "This saves a dashboard alias that replaces the one in config.yml." : "");
+    $("#alias-kav").focus(); return;
+  }
+  if (act === "del") { aliasState.pending = { kind: "delete", i: Number(btn.dataset.i), title: a.suwayomi_title }; aliasRender(); return; }
+  if (act === "del-go") {
+    try { aliasState.pending = null; aliasRender(await aliasCall("api/aliases/delete", { suwayomi_title: a.suwayomi_title }));
+          aliasNote(`Deleted the alias for “${a.suwayomi_title}”.`, "ok"); aliasReset(); }
+    catch (err) { aliasNote(err.message, "error"); }
+    return;
+  }
+  if (act === "move") {
+    // #16: preview first, then an inline confirmation; nobody has to put files back into the Suwayomi folder by hand
+    btn.disabled = true; aliasNote("Looking for chapters to move…");
+    try {
+      const plan = await aliasCall("api/aliases/reprocess", { suwayomi_title: a.suwayomi_title });
+      if (!plan.moves.length) { aliasNote(plan.message); btn.disabled = false; }
+      else { aliasNote(""); aliasState.pending = { kind: "move", i: Number(btn.dataset.i), title: a.suwayomi_title, plan }; aliasRender(); }
+    } catch (err) { aliasNote(err.message, "error"); btn.disabled = false; }
+    return;
+  }
+  if (act === "move-go") {
+    const title = a.suwayomi_title; btn.disabled = true; aliasNote("Moving…");
+    try { const r = await aliasCall("api/aliases/reprocess", { suwayomi_title: title, apply: true }); aliasState.pending = null; aliasRender(); aliasNote(r.message, "ok"); }
+    catch (err) { aliasNote(err.message, "error"); btn.disabled = false; }
+  }
+});
+
+load(); status(); setInterval(status, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+config/
+data/
+postgres/
+*.log
+# local deployment overrides (LAN addresses, reverse-proxy labels)
+docker-compose.override.yml
+compose.override.yaml

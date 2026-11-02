@@ -1,0 +1,75 @@
+{% extends "tool_base.html" %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='cbz.css') }}">{% endblock %}
+{% block actions %}<span class="cbz-count" id="count" aria-live="polite"></span>{% endblock %}
+{% block content %}
+<p class="cbz-lede">Edit the <code>ComicInfo.xml</code> inside your <code>.cbz</code> files, one at a time or in bulk, then download the result. Your originals are never touched, and uploads are cleared whenever the container restarts.</p>
+
+<label class="cbz-drop" id="drop" tabindex="0" role="button" aria-describedby="drop-hint">
+  <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16"/></svg>
+  <span><strong>Drop .cbz files here</strong> or press to choose</span>
+  <small id="drop-hint">Up to {{ max_upload_mb }} MB per upload</small>
+  <input id="picker" type="file" accept=".cbz,.zip" multiple hidden>
+</label>
+<div class="cbz-progress" id="progress" hidden><div></div></div>
+
+<section class="card" aria-labelledby="files-h">
+  <div class="row between">
+    <h2 id="files-h">Files</h2>
+    <div class="row">
+      <span class="cbz-muted" id="selcount" aria-live="polite"></span>
+      <button class="btn sm" id="dl" type="button" disabled>Download</button>
+      <button class="btn sm cbz-danger" id="rm" type="button" disabled>Remove</button>
+    </div>
+  </div>
+  <div class="cbz-scroll">
+    <table class="t cbz-table">
+      <thead><tr>
+        <th scope="col" class="cbz-check"><input type="checkbox" id="all" aria-label="Select all files"></th>
+        <th scope="col">File</th><th scope="col">Series</th><th scope="col">No.</th><th scope="col">Vol.</th><th scope="col">Title</th><th scope="col"><span class="sr">Status</span></th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+  </div>
+  <p class="cbz-muted cbz-none" id="empty">No files yet. Drop some above.</p>
+</section>
+
+<section class="card" aria-labelledby="bulk-h">
+  <h2 id="bulk-h">Bulk edit selected files</h2>
+  <div class="row cbz-addrow">
+    <select id="newop" aria-label="Operation type">
+      <option value="set">Set a field to a value</option>
+      <option value="number">Auto-number a field</option>
+      <option value="regex">Regex find and replace</option>
+    </select>
+    <button class="btn sm" id="addop" type="button">Add operation</button>
+    <span class="cbz-muted">Steps run in order. Numbering follows file name order.</span>
+  </div>
+  <div class="cbz-ops" id="ops"></div>
+  <div class="row">
+    <button class="btn sm" id="preview" type="button" disabled>Preview</button>
+    <button class="btn sm sig" id="apply" type="button" disabled>Apply to selected</button>
+  </div>
+  <div class="cbz-scroll" id="previewbox" hidden>
+    <table class="t cbz-preview"><thead><tr><th scope="col">File</th><th scope="col">Field</th><th scope="col">Before</th><th scope="col">After</th></tr></thead><tbody id="prevrows"></tbody></table>
+  </div>
+</section>
+
+<dialog class="panel" id="editor" aria-labelledby="edtitle">
+  <div class="panel-body">
+    <div class="panel-head">
+      <h2 id="edtitle">Edit file</h2>
+      <button class="btn sm" id="edclose" type="button">Close</button>
+    </div>
+    <p class="cbz-muted cbz-fname" id="edname"></p>
+    <form id="edform" class="cbz-grid" autocomplete="off"></form>
+    <div class="row cbz-edfoot">
+      <button class="btn sig" id="edsave" type="button">Save changes</button>
+    </div>
+  </div>
+</dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+{% endblock %}
+{% block scripts %}
+<script>window.CBZ_API = {{ (request.script_root ~ '/api/cbz')|tojson }};</script>
+<script src="{{ url_for('static', filename='cbz.js') }}"></script>
+{% endblock %}

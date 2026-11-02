@@ -1,0 +1,31 @@
+title: |
+  {{- if eq .New "Yes" -}}
+    {{- if eq .category "Regular" -}}🎉 New Manga Added 🎉
+    {{- else if eq .category "Adult" -}}🔞 New Adult Manga Added 🔞
+    {{- else if eq .category "Hentai" -}}🔞 New Hentai Manga Added 🔞
+    {{- else -}}📚 New Manga Added 📚{{- end }}
+  {{- else -}}
+    {{- if eq .category "Regular" -}}🎉 Manga Updated 🎉
+    {{- else if eq .category "Adult" -}}🔞 Adult Manga Updated 🔞
+    {{- else if eq .category "Hentai" -}}🔞 Hentai Manga Updated 🔞
+    {{- else -}}📚 Manga Updated 📚{{- end }}
+  {{- end }}
+
+message: |
+  {{- if eq .New "Yes" -}}
+    {{- if eq .category "Regular" -}}🎉 The New Manga: "{{ .MangaTitle }}" Has Been Added 🎉
+    {{- else if eq .category "Adult" -}}🔞 The New Adult Manga: "{{ .MangaTitle }}" Has Been Added 🔞
+    {{- else if eq .category "Hentai" -}}🔞 The New Hentai Manga: "{{ .MangaTitle }}" Has Been Added 🔞
+    {{- else -}}📚 The New Manga: "{{ .MangaTitle }}" Has Been Added 📚{{- end }}
+  {{- else -}}
+    {{- if eq .category "Regular" -}}🎉 The Manga: "{{ .MangaTitle }}" Has Been Updated 🎉
+    {{- else if eq .category "Adult" -}}🔞 The Adult Manga: "{{ .MangaTitle }}" Has Been Updated 🔞
+    {{- else if eq .category "Hentai" -}}🔞 The Hentai Manga: "{{ .MangaTitle }}" Has Been Updated 🔞
+    {{- else -}}📚 The Manga: "{{ .MangaTitle }}" Has Been Updated 📚{{- end }}
+  {{- end }}
+
+  {{- if ne .Chapters "" -}}
+  {{- "\n" }}
+  CHAPTERS:
+  {{ .Chapters }}
+  {{- end }}

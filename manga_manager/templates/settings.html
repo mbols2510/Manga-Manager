@@ -1,0 +1,71 @@
+{% extends "tool_base.html" %}
+{% block actions %}
+<button class="btn sm" id="save" type="button">Save settings</button>
+{% endblock %}
+{% block content %}
+<section class="card" aria-labelledby="conn-h">
+  <div class="row between">
+    <h2 id="conn-h">Connections</h2>
+    <div class="row"><button class="btn sm" id="test-conn" type="button">Test connections</button>
+      <button class="btn sm" id="test-ntfy" type="button">Send test notification</button></div>
+  </div>
+  <div id="conn" class="grid2" aria-live="polite"><p class="empty">Press “Test connections”.</p></div>
+</section>
+<form id="form" autocomplete="off" onsubmit="return false"></form>
+<section class="card" aria-labelledby="db-h">
+  <h2 id="db-h">Database</h2>
+  <p class="hint" id="db" style="color:var(--ink-soft)"></p>
+  <p class="hint" style="color:var(--ink-soft)">Set with <code>DATABASE_URL</code> in <code>.env</code>; it can’t be changed here.</p>
+</section>
+<section class="card" aria-labelledby="jobs-h"><h2 id="jobs-h">Background jobs</h2><div id="jobs"></div></section>
+<div class="row" id="restart-row" hidden><span class="pill mid">Changes saved</span>
+  <button class="btn sig" id="restart" type="button">Restart to apply</button></div>
+{% endblock %}
+{% block scripts %}
+<script>
+const $ = (s) => document.querySelector(s);
+const api = (p, o) => fetch(p, o).then(r => r.json());
+const esc = (t) => String(t ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2600); }
+
+function field(i) {
+  const id = 'f-' + i.key.replace(/\W/g, '-');
+  const hint = i.hint ? `<span class="hint">${esc(i.hint)}</span>` : '';
+  const src = i.source === 'env' ? ' <span class="pill">from .env</span>' : '';
+  let input;
+  if (i.kind === 'bool') input = `<label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="${id}" data-key="${i.key}" ${i.value ? 'checked' : ''}> Enabled</label>`;
+  else if (i.kind === 'select') input = `<select id="${id}" data-key="${i.key}">${i.choices.map(c => `<option value="${esc(c[0])}" ${String(i.value) === c[0] ? 'selected' : ''}>${esc(c[1])}</option>`).join('')}</select>`;
+  else if (i.kind === 'secret') input = `<input type="password" id="${id}" data-key="${i.key}" placeholder="${i.set ? '•••••••• (saved)' : 'not set'}" autocomplete="new-password">`;
+  else input = `<input type="${i.kind === 'int' ? 'number' : i.kind === 'url' ? 'url' : 'text'}" id="${id}" data-key="${i.key}" value="${esc(i.value)}">`;
+  return `<div class="field"><label for="${id}">${esc(i.label)}${src}</label>${input}${hint}</div>`;
+}
+async function load() {
+  const d = await api('api/settings');
+  const groups = {};
+  d.items.forEach(i => (groups[i.group] ||= []).push(i));
+  $('#form').innerHTML = Object.entries(groups).map(([g, items]) =>
+    `<section class="card"><h2>${esc(g)}</h2><div class="grid2">${items.map(field).join('')}</div></section>`).join('');
+  $('#db').textContent = d.database;
+}
+async function save() {
+  const values = {};
+  document.querySelectorAll('[data-key]').forEach(el => { values[el.dataset.key] = el.type === 'checkbox' ? el.checked : el.value; });
+  const r = await api('api/settings', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({values})});
+  toast(r.changed.length ? `${r.changed.length} setting(s) saved` : 'Nothing changed');
+  if (r.restart_needed) $('#restart-row').hidden = false;
+  load();
+}
+async function testConn() {
+  $('#conn').innerHTML = '<p class="empty">Testing…</p>';
+  const d = await api('api/health');
+  const cls = {ok: 'ok', fail: 'bad', unset: 'mid'}, label = {ok: 'Connected', fail: 'Failed', unset: 'Not set'};
+  $('#conn').innerHTML = d.checks.map(c => `<div class="row"><span class="pill ${cls[c.state]}">${label[c.state]}</span><strong>${esc(c.name)}</strong><span style="color:var(--ink-soft)">${esc(c.detail)}</span></div>`).join('');
+  $('#jobs').innerHTML = Object.values(d.jobs).map(j => `<div class="row"><span class="pill ${j.last_error ? 'bad' : j.running ? 'mid' : 'ok'}">${j.running ? 'running' : j.last_error ? 'error' : 'idle'}</span><strong>${esc(j.name)}</strong><span style="color:var(--ink-soft)">last ${esc(j.last_finished || '—')} · next ${esc(j.next_run || '—')} ${esc(j.last_error)}</span></div>`).join('') || '<p class="empty">No jobs.</p>';
+}
+$('#save').onclick = save;
+$('#test-conn').onclick = testConn;
+$('#test-ntfy').onclick = async () => { const r = await api('api/health/test-notification', {method: 'POST'}); toast(r.ok ? 'Test notification sent' : r.error); };
+$('#restart').onclick = async () => { await api('api/settings/restart', {method: 'POST'}); toast('Restarting… reload in a few seconds'); setTimeout(() => location.reload(), 6000); };
+load(); testConn();
+</script>
+{% endblock %}

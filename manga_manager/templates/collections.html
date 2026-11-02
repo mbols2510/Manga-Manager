@@ -1,0 +1,63 @@
+{% extends "tool_base.html" %}
+{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='collections.css') }}">{% endblock %}
+{% block actions %}
+  <div class="row" style="margin-left:auto">
+    <button class="btn sm" id="dry" type="button">Preview</button>
+    <button class="btn sig sm" id="go" type="button">Run now</button>
+  </div>
+{% endblock %}
+{% block content %}
+<p class="summary lede">Files Kavita series into collections by genre, tag or series name. Scan options and the notification topic live in <a href="{{ url_for('core.settings_page') }}">Settings</a>.</p>
+
+<section class="col-status card" id="status" aria-live="polite">
+  <div><small>Status</small><b id="st-state">Idle</b></div>
+  <div><small>Last run</small><b id="st-last">Never</b></div>
+  <div><small>Next scheduled run</small><b id="st-next">Not scheduled</b></div>
+  <div><small>Libraries scanned</small><b id="st-libs">All</b></div>
+</section>
+
+<div class="bar" role="tablist" aria-label="Collections views">
+  <button class="ch" type="button" role="tab" data-tab="rules" aria-pressed="true">Rules</button>
+  <button class="ch" type="button" role="tab" data-tab="history" aria-pressed="false">History</button>
+  <span class="vsep" aria-hidden="true"></span>
+  <button class="ch" type="button" id="test">Test Kavita connection</button>
+</div>
+
+<section data-panel="rules">
+  <div class="row between sect-head"><h2>Rules</h2><button class="btn sm" id="add-rule" type="button">Add rule</button></div>
+  <ul class="rules" id="rules"></ul>
+</section>
+
+<section data-panel="history" hidden>
+  <div class="row between sect-head"><h2>Run history</h2><button class="btn sm" id="refresh-hist" type="button">Refresh</button></div>
+  <div id="history"></div>
+</section>
+
+<dialog class="rule-dlg" id="dlg" aria-labelledby="dlg-title">
+  <form id="rule-form" method="dialog">
+    <h2 id="dlg-title">Add rule</h2>
+    <div class="field"><label for="r-name">Name</label><input type="text" id="r-name" required></div>
+    <div class="field"><label for="r-kw">Keywords</label>
+      <input type="text" id="r-kw" list="kw-list" required placeholder="star wars, clone wars" autocomplete="off">
+      <datalist id="kw-list"></datalist><span class="hint">Comma separated, not case-sensitive.</span></div>
+    <fieldset class="field"><legend>Look in</legend>
+      <div class="row"><label class="check"><input type="checkbox" name="f" value="genres"> Genres</label>
+        <label class="check"><input type="checkbox" name="f" value="tags"> Tags</label>
+        <label class="check"><input type="checkbox" name="f" value="name"> Series name</label></div></fieldset>
+    <div class="grid2">
+      <div class="field"><label for="r-match">Match</label>
+        <select id="r-match"><option value="contains">Contains keyword</option><option value="exact">Equals keyword</option></select></div>
+      <div class="field"><label for="r-col">Collection</label><select id="r-col"></select></div>
+    </div>
+    <label class="check"><input type="checkbox" id="r-on"> Enabled</label>
+    <div class="row dlg-foot">
+      <button type="button" class="btn sm bad" id="r-del">Delete</button>
+      <span style="flex:1"></span>
+      <button type="button" class="btn sm" id="r-cancel">Cancel</button>
+      <button type="submit" class="btn sig sm">Save rule</button>
+    </div>
+  </form>
+</dialog>
+<div class="toast" id="toast" role="status" hidden></div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='collections.js') }}"></script>{% endblock %}
