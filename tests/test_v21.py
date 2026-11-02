@@ -275,7 +275,7 @@ def test_example_config_loads_and_links_default_to_url(tmp_path, monkeypatch):
     from pathlib import Path
     monkeypatch.setenv("KAVITA_API_KEY", "x")
     cfg = load_config(Path(__file__).parent.parent / "config.example.yml")
-    assert cfg.kavita_public_url == cfg.kavita_url and not cfg.auth_enabled
+    assert cfg.kavita_public_url == cfg.kavita_url and cfg.auth_enabled
 
 
 def test_dashboard_marks_mature_categories(env):
