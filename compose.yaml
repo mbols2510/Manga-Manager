@@ -1,7 +1,6 @@
 # Manga Manager: download this file and .env.example, then
 #   cp .env.example .env     # fill it in
-#   docker compose up -d                       # you already run PostgreSQL (set DATABASE_URL)
-#   docker compose --profile db up -d          # or: also start a bundled PostgreSQL
+#   docker compose up -d                       # needs your own PostgreSQL (DATABASE_URL in .env)
 # Dashboard: http://<host>:8080
 services:
   manga-manager:
@@ -23,24 +22,3 @@ services:
       - ./data:/data                             # thumbnail cache, logs, CBZ scratch space
       - ${SUWAYOMI_DOWNLOADS:-./suwayomi-downloads}:/suwayomi/downloads   # Suwayomi download folder
       - ${MANGA_ROOT:-./manga}:/manga            # Kavita library folders (Regular / Adult / Hentai)
-    depends_on:
-      db:
-        condition: service_healthy
-        required: false                          # only when started with --profile db
-
-  db:
-    profiles: ["db"]
-    image: postgres:16-alpine
-    container_name: manga-manager-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-manga}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}   # required when using --profile db
-      POSTGRES_DB: ${POSTGRES_DB:-manga_manager}
-    volumes:
-      - ./postgres:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10

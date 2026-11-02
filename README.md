@@ -14,27 +14,20 @@ One container, one login, one PostgreSQL database.
 
 ## Install
 
-You need Docker with Compose and a PostgreSQL server (or use the bundled one).
+You need Docker with Compose and a PostgreSQL server you already run. Put its address in `DATABASE_URL`.
 
 ```bash
 mkdir manga-manager && cd manga-manager
 curl -O https://raw.githubusercontent.com/mbols2510/Manga-Manager/main/compose.yaml
 curl -o .env https://raw.githubusercontent.com/mbols2510/Manga-Manager/main/.env.example
 $EDITOR .env          # database, folders, Kavita / Suwayomi / ntfy
-docker compose up -d                      # with your own PostgreSQL (DATABASE_URL)
-# docker compose --profile db up -d       # or with the bundled PostgreSQL
+docker compose up -d
 ```
 
 Open `http://<host>:8080`. The first account you sign up becomes the login for everything.
 Then go to **Settings** to check the connections.
 
-With your own PostgreSQL create the database first:
-
-```sql
-CREATE DATABASE manga_manager;
-```
-
-Tables are created automatically on start.
+Use an existing database (or create one first). The tables are created automatically on start.
 
 ### Folders
 
