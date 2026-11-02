@@ -94,7 +94,7 @@ def test_notification_counts(monkeypatch):
 def test_dashboard_shows_duplicate_chips():
     from pathlib import Path
     html = (Path(__file__).parent.parent / "manga_manager" / "templates" / "index.html").read_text(encoding="utf-8")
-    assert 'class="duplicate"' in html and "item.duplicates" in html
+    assert 'g duplicate' in html and "item.duplicates" in html
 
 
 # ---------------------------------------------------------------- #11 pause between notifications

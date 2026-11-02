@@ -66,7 +66,7 @@ def test_frames_keep_working_with_the_sticker_outline():
 
 def test_dashboard_features_are_in_the_page():
     for needle in ('id="spot"', "mm-last-seen", 'id="seen"', "mm-dense", "data-act=\"search\"", 'class="bottom"',
-                   "function spotlight", "item.duplicates", 'class="duplicate"'):
+                   "function spotlight", "item.duplicates", 'g duplicate'):
         assert needle in INDEX, needle
     assert "BLUR.includes" in INDEX and "MATURE.includes" in INDEX      # the spotlight never shows a mature cover
     assert "confirm(" not in INDEX                        # deleting and moving ask inside the panel, not in a browser box

@@ -9,3 +9,4 @@ postgres/
 # local deployment overrides (LAN addresses, reverse-proxy labels)
 docker-compose.override.yml
 compose.override.yaml
+_preview/
