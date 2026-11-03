@@ -23,8 +23,8 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/manga_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt pytest
@@ -34,6 +34,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: docker build -t manga-manager:ci .
       - run: docker run --rm manga-manager:ci --version
