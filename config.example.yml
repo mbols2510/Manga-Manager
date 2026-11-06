@@ -79,6 +79,13 @@ ntfy:
                              # server-side template again, with the cover as small icon only
   chapter_status: true       # "Chapter: 7 (New)" / "(Replaced)"; false = plain "Chapter: 7" as before
 
+discord:                     # optional cards next to ntfy (ntfy is unchanged)
+  enabled: ${DISCORD_ENABLED:-false}
+  webhook_url: ${DISCORD_WEBHOOK_URL}
+  emoji_new: ""              # custom server emoji, e.g. <:mm_new:123456789>; empty = green square
+  emoji_replaced: ""
+  emoji_duplicate: ""
+
 web:
   enabled: true
   port: 8080                 # port inside the container; map it in docker-compose.yml

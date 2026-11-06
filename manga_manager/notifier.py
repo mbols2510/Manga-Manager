@@ -123,6 +123,23 @@ class Notifier:
             self._last_sent = self._clock()
 
 
+class NotifierGroup:
+    """Sends every update through each notifier (ntfy, Discord, ...); one failing never blocks the others."""
+
+    def __init__(self, *notifiers):
+        self.notifiers = [n for n in notifiers if n is not None]
+
+    def send(self, **kwargs) -> bool:
+        results = []
+        for n in self.notifiers:
+            try:
+                results.append(n.send(**kwargs))
+            except Exception:   # a notifier must never break the run
+                log.exception("%s failed", type(n).__name__)
+                results.append(False)
+        return any(results)
+
+
 # Same wording as ntfy/MangaUpdates.yml; tests/test_notifier_text.py checks the two agree.
 _TITLES = {
     ("Yes", "Regular"): "\U0001F389 New Manga Added \U0001F389",

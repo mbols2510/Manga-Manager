@@ -106,6 +106,13 @@ class Config:
     ntfy_attach_icon: bool = True
     ntfy_attach_cover: bool = True
     ntfy_chapter_status: bool = True
+
+    # Discord (runs next to ntfy)
+    discord_enabled: bool = False
+    discord_webhook_url: str = ""
+    discord_emoji_new: str = ""
+    discord_emoji_replaced: str = ""
+    discord_emoji_duplicate: str = ""
     # web
     web_enabled: bool = True
     web_host: str = "0.0.0.0"
@@ -237,6 +244,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
     kav = raw.get("kavita", {}) or {}
     cov = raw.get("covers", {}) or {}
     ntfy = raw.get("ntfy", {}) or {}
+    discord = raw.get("discord", {}) or {}
     web = raw.get("web", {}) or {}
     auth = web.get("auth", {}) or {}
     frame = web.get("frame", {}) or {}
@@ -304,6 +312,11 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         ntfy_attach_icon=_as_bool(ntfy.get("attach_icon"), True),
         ntfy_attach_cover=_as_bool(ntfy.get("attach_cover"), True),
         ntfy_chapter_status=_as_bool(ntfy.get("chapter_status"), True),
+        discord_enabled=_as_bool(discord.get("enabled"), False),
+        discord_webhook_url=str(discord.get("webhook_url", "") or ""),
+        discord_emoji_new=str(discord.get("emoji_new", "") or ""),
+        discord_emoji_replaced=str(discord.get("emoji_replaced", "") or ""),
+        discord_emoji_duplicate=str(discord.get("emoji_duplicate", "") or ""),
         web_enabled=_as_bool(web.get("enabled"), True),
         web_host=str(web.get("host", "0.0.0.0")),
         web_port=int(web.get("port", 8080)),

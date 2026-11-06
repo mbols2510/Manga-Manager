@@ -56,6 +56,11 @@ register(
     Setting("ntfy.url", "ntfy server URL", "Notifications (ntfy)", "url", "NTFY_URL", hint="e.g. https://ntfy.sh or your own server", attr="ntfy_url"),
     Setting("ntfy.token", "Access token", "Notifications (ntfy)", "secret", "NTFY_TOKEN", hint="Optional", attr="ntfy_token"),
     Setting("ntfy.topic", "Topic: new manga", "Notifications (ntfy)", "text", "NTFY_TOPIC", "Manga_Updates", attr="ntfy_topic"),
+    Setting("discord.enabled", "Send Discord cards", "Notifications (Discord)", "bool", "DISCORD_ENABLED", False, attr="discord_enabled"),
+    Setting("discord.webhook_url", "Webhook URL", "Notifications (Discord)", "secret", "DISCORD_WEBHOOK_URL", hint="Discord channel → Integrations → Webhooks", attr="discord_webhook_url"),
+    Setting("discord.emoji_new", "Emoji: new", "Notifications (Discord)", "text", "DISCORD_EMOJI_NEW", hint="Custom emoji code like <:mm_new:123…>; empty = 🟩", attr="discord_emoji_new"),
+    Setting("discord.emoji_replaced", "Emoji: replaced", "Notifications (Discord)", "text", "DISCORD_EMOJI_REPLACED", hint="Empty = 🟧", attr="discord_emoji_replaced"),
+    Setting("discord.emoji_duplicate", "Emoji: duplicate", "Notifications (Discord)", "text", "DISCORD_EMOJI_DUPLICATE", hint="Empty = 🟪", attr="discord_emoji_duplicate"),
     Setting("web.public_url", "Dashboard public URL", "Notifications (ntfy)", "url", "WEB_PUBLIC_URL", hint="Used for covers and buttons inside notifications", attr="web_public_url"),
 )
 

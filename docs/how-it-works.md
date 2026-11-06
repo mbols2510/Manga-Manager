@@ -22,7 +22,7 @@ Suwayomi downloads/mangas/<source>/<manga>/*.cbz
         └─ existing series → POST /api/Series/scan
         │
         ▼
- wait for new series to appear → ntfy notification → dashboard history
+ wait for new series to appear → ntfy notification (and optional Discord card) → dashboard history
         (Kavita series name; each chapter marked new, replaced or duplicate)
         │
         ▼

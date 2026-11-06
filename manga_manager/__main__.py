@@ -23,7 +23,8 @@ from .covers import CoverStore
 from .db import Database
 from .history import History
 from .kavita import KavitaClient
-from .notifier import Notifier
+from .discord import DiscordNotifier
+from .notifier import Notifier, NotifierGroup
 from .pipeline import Pipeline
 from .scheduler import ALREADY_RUNNING, Scheduler
 from .settings import Settings
@@ -86,6 +87,11 @@ def build(cfg: Config, db: Database):
                         dashboard_url=cfg.web_public_url, attach_icon=cfg.ntfy_attach_icon,
                         enabled=cfg.ntfy_enabled, dry_run=cfg.dry_run, attach_cover=cfg.ntfy_attach_cover,
                         chapter_status=cfg.ntfy_chapter_status, thumb_path=thumb_path)
+    discord = DiscordNotifier(cfg.discord_webhook_url, dashboard_url=cfg.web_public_url,
+                              enabled=cfg.discord_enabled, dry_run=cfg.dry_run, thumb_path=thumb_path,
+                              emoji_new=cfg.discord_emoji_new, emoji_replaced=cfg.discord_emoji_replaced,
+                              emoji_duplicate=cfg.discord_emoji_duplicate)
+    notifier = NotifierGroup(notifier, discord)
 
     def make_pipeline() -> Pipeline:
         return Pipeline(cfg, suwayomi, kavita, covers, history, notifier)

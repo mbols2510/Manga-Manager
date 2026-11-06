@@ -4,7 +4,7 @@ One self-hosted dashboard for a Suwayomi → Kavita manga setup. It replaces fou
 
 | Tab | What it does |
 |---|---|
-| **Updates** | Moves finished Suwayomi downloads into the right Kavita library, tells Kavita to scan, syncs covers and sends an ntfy message per manga. Shows everything that was added. |
+| **Updates** | Moves finished Suwayomi downloads into the right Kavita library, tells Kavita to scan, syncs covers and sends an ntfy message (and optionally a Discord card) per manga. Shows everything that was added. |
 | **Doubles** | Finds chapters that exist as more than one file in Kavita, lets you keep one and trash the rest, and sends a **weekly** ntfy digest. |
 | **Collections** | Adds series to Kavita collections automatically from rules on genres, tags or names. |
 | **CBZ** | Upload `.cbz` files, edit `ComicInfo.xml` (single or bulk), download the result. |
@@ -51,6 +51,15 @@ goes to the trash (restorable on the **Doubles** tab, deleted after the retentio
 source than what Kavita has is dropped the same way. If the preferred file has far fewer pages (default under 60%) both
 files are kept and the chapter shows as a duplicate. **Preview** on an alias shows what the waiting downloads would replace.
 Chapters the official source doesn't have yet stay as they are. The switches are under **Settings → Preferred sources**.
+
+## Discord cards (optional, next to ntfy)
+
+Set `DISCORD_ENABLED=true` and `DISCORD_WEBHOOK_URL` (or use **Settings → Notifications (Discord)**) and every
+update also posts a card to that channel; ntfy keeps working exactly as before.
+
+- bar colour: gold = new series, red = Adult/Hentai update, green = regular update
+- one row per status (new / replaced / duplicate) with chapters as ranges, plus the cover and a link to the dashboard
+- optional custom emoji for the status badges (`emoji_new`, `emoji_replaced`, `emoji_duplicate`), otherwise 🟩 🟧 🟪
 
 ## Weekly double-chapter digest
 
