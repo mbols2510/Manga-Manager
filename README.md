@@ -86,7 +86,7 @@ docker compose run --rm \
 
 ## Android app
 
-A companion Android app lives in `android/` and is under development; it is not built or released yet. It will
+A companion Android app is planned and under development; it is not built or released yet. It will
 show the same updates feed on a phone and notify on new chapters.
 
 To prepare a device, sign in as an administrator, open **Settings > Devices**, name the device and press

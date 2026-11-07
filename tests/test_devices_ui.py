@@ -84,15 +84,36 @@ def _rules_for(app, endpoint):
     return [r.rule for r in app.url_map.iter_rules() if r.endpoint == endpoint]
 
 
-def test_api_docs_list_every_allowlisted_endpoint(app_ctx):
-    app, _ = app_ctx
-    docs = (ROOT / "docs" / "api-v1.md").read_text()
+def _missing_doc_rows(app, docs: str) -> list[tuple[str, str, str]]:
+    """(method, url, endpoint) for each allowlisted route/method with no table row `| `METHOD` | `url` | `endpoint` |`."""
     missing = []
     for endpoint in sorted(DEVICE_ALLOWED_ENDPOINTS):
         rules = _rules_for(app, endpoint)
         assert rules, f"allowlisted endpoint {endpoint} has no route"
-        for rule in rules:
-            documented = re.sub(r"<\w+(?:\([^)]*\))?:", "<", rule)   # docs write <series_id>, not <int:series_id>
-            if documented not in docs:
-                missing.append((endpoint, rule))
-    assert not missing
+        for rule in app.url_map.iter_rules():
+            if rule.endpoint != endpoint:
+                continue
+            url = re.sub(r"<\w+(?:\([^)]*\))?:", "<", rule.rule)   # docs write <series_id>, not <int:series_id>
+            for method in sorted(rule.methods - {"HEAD", "OPTIONS"}):
+                row = rf"^\|\s*`{method}`\s*\|\s*`{re.escape(url)}`\s*\|\s*`{re.escape(endpoint)}`\s*\|\s*$"
+                if not re.search(row, docs, re.M):
+                    missing.append((method, url, endpoint))
+    return missing
+
+
+def test_api_docs_list_every_allowlisted_endpoint(app_ctx):
+    app, _ = app_ctx
+    docs = (ROOT / "docs" / "api-v1.md").read_text()
+    assert _missing_doc_rows(app, docs) == []
+
+
+@pytest.mark.parametrize("url", ["/api/double-chapters/series", "/api/v1/changes", "/api/health",
+                                 "/api/double-chapters/trash"])
+def test_docs_check_fails_when_a_row_is_removed(app_ctx, url):
+    """Removing one row must be caught even though longer URLs (or prose) still contain that URL."""
+    app, _ = app_ctx
+    docs = (ROOT / "docs" / "api-v1.md").read_text()
+    kept = [line for line in docs.splitlines() if not re.match(rf"^\|\s*`GET`\s*\|\s*`{re.escape(url)}`", line)]
+    assert len(kept) == len(docs.splitlines()) - 1
+    missing = _missing_doc_rows(app, "\n".join(kept))
+    assert [m[1] for m in missing] == [url]

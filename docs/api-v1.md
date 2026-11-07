@@ -61,7 +61,8 @@ Everything not in this list is refused for device tokens, including `/health` (u
 | `GET` | `/api/v1/changes` | `v1.changes` |
 | `GET` | `/api/v1/changes/latest` | `v1.latest` |
 
-Responses on these routes carry `Cache-Control: no-store` when auth is enabled.
+When auth is enabled, `text/html` and `application/json` responses carry `Cache-Control: no-store`. Other
+responses, such as thumbnails and cover images, are not covered by that header.
 
 ## Change feed
 
