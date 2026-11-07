@@ -332,8 +332,11 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
             kind=request.args.get("kind") or None,
             query=query, also_titles=also,
         )
+        # Same rule as /api/v1/changes: the Android feed is also filled from here and blurs these covers (spec 7.5).
+        mature = {c.lower() for c in cfg.web_mature_categories}
         for item in items:
             decorate_update(item)
+            item["sensitive"] = (item.get("category") or "").lower() in mature
         return jsonify({"items": items, "total": total, "offset": offset, "limit": limit})
 
     @app.get("/api/aliases")

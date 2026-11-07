@@ -124,6 +124,18 @@ def test_mature_category_marked_sensitive(db, tmp_path, monkeypatch):
     assert [i["sensitive"] for i in items] == [True, False]
 
 
+def test_api_updates_marks_mature_category_sensitive(db, tmp_path, monkeypatch):
+    # The app's feed is also filled from /api/updates, so it needs the same flag to blur mature covers (spec 7.5).
+    app, ctx = build_app(db, tmp_path, monkeypatch=monkeypatch)
+    hd = bearer(DeviceStore(db).create("Pixel 8", "admin")[1])
+    ctx.cfg.web_mature_categories = ["Adult"]
+    h = History(db)
+    h.add_update(title="A", category="adult", is_new=True, chapters=["1"])
+    h.add_update(title="B", category="Manga", is_new=True, chapters=["1"])
+    items = app.test_client().get("/api/updates", headers=hd).json["items"]
+    assert sorted((i["title"], i["sensitive"]) for i in items) == [("A", True), ("B", False)]
+
+
 @pytest.mark.parametrize("limit,expected", [(0, 1), (-5, 1), (500, 200), (3, 3)])
 def test_limit_is_clamped_to_1_200(env, limit, expected):
     app, h, _, hd = env

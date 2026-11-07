@@ -64,6 +64,9 @@ Everything not in this list is refused for device tokens, including `/health` (u
 When auth is enabled, `text/html` and `application/json` responses carry `Cache-Control: no-store`. Other
 responses, such as thumbnails and cover images, are not covered by that header.
 
+`GET /api/updates` items carry the same `sensitive` flag as the change feed (below), so a client that fills its
+list from the browse endpoint can hide mature thumbnails too.
+
 ## Change feed
 
 ### `GET /api/v1/changes/latest`
