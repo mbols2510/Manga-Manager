@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import com.mbols2510.mangamanager.R
 import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
 import com.mbols2510.mangamanager.data.repo.AuthState
@@ -37,6 +38,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
+import org.robolectric.annotation.Config
 
 /** Compose UI tests on Robolectric (SDK from robolectric.properties). */
 @RunWith(RobolectricTestRunner::class)
@@ -70,18 +72,23 @@ class UpdatesScreenTest {
     }
 
     @Test
+    @Config(qualifiers = "w411dp-h891dp") // a phone-sized screen, so the list is tall enough to pull
     fun pull_to_refresh_forces_refresh() {
         val repo = FakeFeedRepository(listOf(feedItem(2, title = "Second"), feedItem(1, title = "First")))
         val vm = show(repo)
         rule.waitUntil(5_000) { repo.refreshes == 1 && !vm.state.value.refreshing }
         waitForText("First")
+        // Let the indicator's hide animation (started when the first refresh ended) finish: while it runs, the
+        // pull-to-refresh node ignores scroll deltas.
+        rule.mainClock.advanceTimeBy(2_000)
+        rule.waitForIdle()
 
-        // A slow, long pull from the top of the list (a quick swipe may end as a fling before the threshold).
+        // A slow pull of 400 dp from the top of the list (0.5 drag multiplier: 200 dp, beyond the 80 dp threshold).
         rule.onNodeWithTag(UpdatesTestTags.LIST).performTouchInput {
             down(Offset(left + width / 4f, top + 2f)) // beside the (hidden) indicator
-            val step = (height - 10f) / 30f
-            repeat(30) {
-                advanceEventTime(30)
+            val step = 400.dp.toPx() / 40f
+            repeat(40) {
+                advanceEventTime(20)
                 moveBy(Offset(0f, step))
             }
             advanceEventTime(300) // hold still: no fling velocity on release
