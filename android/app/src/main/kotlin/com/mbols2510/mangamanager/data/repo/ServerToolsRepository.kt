@@ -83,18 +83,116 @@ class DefaultServerToolsRepository(
     private val ensureReady: suspend () -> Unit = {},
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : ServerToolsRepository {
-    // STUB (red commit): every call reports Offline.
-    override suspend fun doubleSeries(): ToolResult<List<DoubleSeriesSummaryDto>> = ToolResult.Offline
-    override suspend fun doubleSeriesDetail(seriesId: Long): ToolResult<DoubleSeriesDto> = ToolResult.Offline
-    override suspend fun remediate(seriesId: Long, chapterId: Long, keepFileId: Long): ToolResult<RemediateResultDto> =
-        ToolResult.Offline
-    override suspend fun trash(): ToolResult<List<TrashEntryDto>> = ToolResult.Offline
-    override suspend fun restoreTrash(trashId: String): ToolResult<TrashEntryDto> = ToolResult.Offline
-    override suspend fun status(): ToolResult<StatusDto> = ToolResult.Offline
-    override suspend fun health(): ToolResult<HealthDto> = ToolResult.Offline
-    override suspend fun runNow(): ToolResult<RunOutcome> = ToolResult.Offline
+
+    override suspend fun doubleSeries() = read { it.doubleSeries() }
+
+    override suspend fun doubleSeriesDetail(seriesId: Long) = read { it.doubleSeriesDetail(seriesId) }
+
+    override suspend fun remediate(seriesId: Long, chapterId: Long, keepFileId: Long) =
+        write { it.remediate(seriesId, chapterId, RemediateRequest(keepFileId)) }
+
+    override suspend fun trash() = read { it.trash() }
+
+    override suspend fun restoreTrash(trashId: String) = write { it.restoreTrash(trashId) }
+
+    override suspend fun status() = read { it.status() }
+
+    override suspend fun health() = read { it.health() }
+
+    override suspend fun runNow(): ToolResult<RunOutcome> = call(changesState = true) { client ->
+        val response = client.run()
+        when (response.code()) {
+            202 -> ToolResult.Success(RunOutcome.Started)
+            409 -> ToolResult.Success(RunOutcome.AlreadyRunning)
+            403 -> ToolResult.Success(RunOutcome.Disabled)
+            else -> if (response.isSuccessful) ToolResult.Success(RunOutcome.Started) else failure(response)
+        }
+    }
+
+    /** A GET returning the DTO itself: non-2xx arrives as [HttpException]. */
+    private suspend fun <T> read(block: suspend (MangaApi) -> T): ToolResult<T> =
+        call(changesState = false) { ToolResult.Success(block(it)) }
+
+    /** A POST returning [Response]: the status is mapped here. */
+    private suspend fun <T> write(block: suspend (MangaApi) -> Response<T>): ToolResult<T> =
+        call(changesState = true) { client ->
+            val response = block(client)
+            val body = response.body()
+            when {
+                response.isSuccessful && body != null -> ToolResult.Success(body)
+                // 2xx without a body: applied, but nothing to show.
+                response.isSuccessful -> ToolResult.MaybeApplied
+                else -> failure(response)
+            }
+        }
+
+    private suspend fun <T> call(
+        changesState: Boolean,
+        block: suspend (MangaApi) -> ToolResult<T>,
+    ): ToolResult<T> = withContext(io) {
+        // Nothing has been sent while the pairing caches load: a failure here is plainly "offline".
+        val client = try {
+            ensureReady()
+            api()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return@withContext ToolResult.Offline
+        }
+        if (client == null) {
+            authState.markUnauthorized()
+            return@withContext ToolResult.Unauthorized
+        }
+        try {
+            block(client)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HttpException) {
+            val raw = e.response()
+            if (raw != null) failure(raw) else ToolResult.ServerError(e.code(), null)
+        } catch (e: Exception) {
+            if (changesState && !certainlyNotSent(e)) ToolResult.MaybeApplied else ToolResult.Offline
+        }
+    }
+
+    private fun failure(response: Response<*>): ToolResult<Nothing> {
+        if (response.code() == 401) {
+            if (response.raw().isOwn401()) {
+                authState.markUnauthorized()
+                return ToolResult.Unauthorized
+            }
+            return ToolResult.Offline // a 401 from another host after a redirect says nothing about our token
+        }
+        return ToolResult.ServerError(response.code(), errorMessage(response.errorBody()))
+    }
 
     companion object {
+        /** Longest server error text shown to the user. */
         const val MAX_ERROR_CHARS = 300
+
+        /**
+         * Failures that happen before the request reaches the server: the gate refused it, no route, no DNS, no TLS
+         * session. Anything else (timeouts, a dropped connection, an unreadable answer) may come after the server
+         * received the request.
+         */
+        internal fun certainlyNotSent(e: Exception): Boolean = e is NotPairedException ||
+            e is UrlPolicyViolation ||
+            e is ConnectException ||
+            e is NoRouteToHostException ||
+            e is UnknownHostException ||
+            e is SSLException
+
+        /** The `error` field of a JSON error body, trimmed and capped; null for HTML or anything else. */
+        internal fun errorMessage(body: ResponseBody?): String? = try {
+            body?.use { b ->
+                val text = b.string()
+                MangaApiFactory.json.decodeFromString(ErrorDto.serializer(), text).error
+                    ?.trim()
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.take(MAX_ERROR_CHARS)
+            }
+        } catch (_: Exception) {
+            null
+        }
     }
 }
