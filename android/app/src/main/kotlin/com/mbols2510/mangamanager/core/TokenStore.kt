@@ -1,32 +1,118 @@
 package com.mbols2510.mangamanager.core
 
+import android.content.Context
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import java.security.KeyStore
+import java.util.Base64
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
 interface TokenStore {
     fun save(token: String)
     fun load(): String?
     fun clear()
 }
 
+/** Seam so the encryption logic runs on the JVM. Blob layout: 12-byte IV, then ciphertext and GCM tag. */
 internal interface TokenCipher {
     fun encrypt(plain: ByteArray): ByteArray
     fun decrypt(blob: ByteArray): ByteArray
 }
 
+/** Raw persistence of one opaque blob. */
 internal interface ByteStore {
     fun read(): ByteArray?
     fun write(bytes: ByteArray)
     fun delete()
 }
 
+/** Encrypts the token before it reaches [ByteStore]. [load] never throws: any failure means "no token". */
 internal class CipherTokenStore(
     private val cipher: TokenCipher,
     private val store: ByteStore,
 ) : TokenStore {
-    override fun save(token: String) = store.write(token.toByteArray(Charsets.UTF_8))
-    override fun load(): String? = store.read()?.toString(Charsets.UTF_8)
+    override fun save(token: String) {
+        store.write(cipher.encrypt(token.toByteArray(Charsets.UTF_8)))
+    }
+
+    override fun load(): String? = try {
+        store.read()?.let { String(cipher.decrypt(it), Charsets.UTF_8) }
+    } catch (_: Exception) {
+        null
+    }
+
     override fun clear() = store.delete()
 }
 
-internal class AesGcmCipher(private val key: () -> javax.crypto.SecretKey) : TokenCipher {
-    override fun encrypt(plain: ByteArray): ByteArray = plain
-    override fun decrypt(blob: ByteArray): ByteArray = blob
+/** AES-256-GCM. The key comes from [key] (Keystore in production, a plain key in tests). The IV is chosen by the cipher. */
+internal class AesGcmCipher(private val key: () -> SecretKey) : TokenCipher {
+    override fun encrypt(plain: ByteArray): ByteArray {
+        val c = Cipher.getInstance(TRANSFORMATION)
+        c.init(Cipher.ENCRYPT_MODE, key())
+        val iv = c.iv
+        check(iv.size == IV_BYTES) { "unexpected IV size" }
+        return iv + c.doFinal(plain)
+    }
+
+    override fun decrypt(blob: ByteArray): ByteArray {
+        require(blob.size >= IV_BYTES + TAG_BYTES) { "blob too short" }
+        val c = Cipher.getInstance(TRANSFORMATION)
+        c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(TAG_BYTES * 8, blob, 0, IV_BYTES))
+        return c.doFinal(blob, IV_BYTES, blob.size - IV_BYTES)
+    }
+
+    private companion object {
+        const val TRANSFORMATION = "AES/GCM/NoPadding"
+        const val IV_BYTES = 12
+        const val TAG_BYTES = 16
+    }
 }
+
+// Android-only glue below. It needs the Keystore and SharedPreferences, so it is not unit-tested on the JVM.
+
+private class KeystoreKey(private val alias: String) : () -> SecretKey {
+    override fun invoke(): SecretKey {
+        val ks = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
+        (ks.getKey(alias, null) as? SecretKey)?.let { return it }
+        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE)
+        gen.init(
+            KeyGenParameterSpec.Builder(alias, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build(),
+        )
+        return gen.generateKey()
+    }
+
+    private companion object {
+        const val ANDROID_KEYSTORE = "AndroidKeyStore"
+    }
+}
+
+private class SharedPrefsByteStore(context: Context, name: String) : ByteStore {
+    private val prefs = context.applicationContext.getSharedPreferences(name, Context.MODE_PRIVATE)
+
+    override fun read(): ByteArray? = prefs.getString(KEY, null)?.let { Base64.getDecoder().decode(it) }
+
+    override fun write(bytes: ByteArray) {
+        prefs.edit().putString(KEY, Base64.getEncoder().encodeToString(bytes)).apply()
+    }
+
+    override fun delete() {
+        prefs.edit().remove(KEY).apply()
+    }
+
+    private companion object {
+        const val KEY = "t"
+    }
+}
+
+/** Production store: non-exportable AES-GCM Keystore key, ciphertext in app-private SharedPreferences (excluded from backup). */
+class KeystoreTokenStore(context: Context) : TokenStore by CipherTokenStore(
+    AesGcmCipher(KeystoreKey("mm_device_token_key")),
+    SharedPrefsByteStore(context, "mm_secure"),
+)
