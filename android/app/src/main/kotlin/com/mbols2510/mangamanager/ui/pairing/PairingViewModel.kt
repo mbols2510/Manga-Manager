@@ -141,8 +141,12 @@ class PairingViewModel(
 
         try {
             withContext(ioDispatcher) {
+                // Nothing may use the old pairing, or a half-written one, while the new one is persisted.
+                credentials.clear()
                 tokenStore.save(candidate.token)
                 settings.setServerUrl(candidate.base.toString())
+                // Publish base and token to the request path together, only now that both writes succeeded.
+                credentials.set(candidate.base, candidate.token)
                 // The first background check must never notify about items that existed before pairing.
                 repository.baseline()
                 // Only now is the device really paired: a failed re-pair keeps needsRepair set.
@@ -159,6 +163,7 @@ class PairingViewModel(
     }
 
     private suspend fun rollBack() = withContext(NonCancellable + ioDispatcher) {
+        credentials.clear() // first: the request path stops using the candidate before the persisted copies go
         runCatching { tokenStore.clear() }
         runCatching { settings.setServerUrl(null) }
     }

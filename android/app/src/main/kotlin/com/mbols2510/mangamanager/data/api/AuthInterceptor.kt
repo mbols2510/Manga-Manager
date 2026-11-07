@@ -71,31 +71,35 @@ class AuthInterceptor(
         return response
     }
 
-    /** A token OkHttp would refuse as a header value is treated as missing (no exception that could carry it). */
-    private fun usableToken(t: String?): String? =
-        t?.takeIf { it.isNotEmpty() && it.all { c -> c in '!'..'~' } }
-
     override fun toString(): String = "AuthInterceptor"
 }
 
+/** A token OkHttp would refuse as a header value is treated as missing (no exception that could carry it). */
+private fun usableToken(t: String?): String? = t?.takeIf { it.isNotEmpty() && it.all { c -> c in '!'..'~' } }
+
 /**
- * Application interceptor of the shared client, placed before [AuthInterceptor]. The paired-server gate runs at
- * request time, so the client itself needs no URL or token to be built: after [UrlPolicy], a request fails with
- * [NotPairedException] (before any socket is opened) when the paired base is not known, no token is cached, or
- * the destination's scheme, host or port differs from the paired base. That also stops an image URL pointing
- * anywhere else. The message never contains a URL or a token. Both suppliers must be non-blocking memory reads.
+ * Application interceptor of the shared client (it replaces [AuthInterceptor] there). Per request it reads the
+ * [credentials] snapshot exactly ONCE and uses that one value for everything: after [UrlPolicy], the request
+ * fails with [NotPairedException] (before any socket is opened) when nothing is paired or the destination's
+ * scheme, host or port differs from the snapshot's base; otherwise it adds `Bearer <that snapshot's token>`.
+ * The snapshot also travels as a request tag, so redirect hops are judged against the base captured here, not
+ * against whatever a re-pair has published since. The message never contains a URL or a token, and a 401 from the
+ * snapshot's own origin calls [onUnauthorized]. [credentials] must be a non-blocking memory read.
  */
 internal class PairedServerGate(
-    private val baseUrl: () -> HttpUrl?,
-    private val token: () -> String?,
+    private val credentials: () -> PairedCredentials?,
+    private val onUnauthorized: () -> Unit,
 ) : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         enforceUrlPolicy(request.url)
-        val base = baseUrl() ?: throw NotPairedException("Not paired with a server")
-        if (token() == null) throw NotPairedException("Not paired with a server")
-        if (!sameOrigin(request.url, base)) throw NotPairedException("Request blocked: not the paired server")
-        return chain.proceed(request)
+        val snapshot = credentials() ?: throw NotPairedException("Not paired with a server")
+        if (!sameOrigin(request.url, snapshot.base)) throw NotPairedException("Request blocked: not the paired server")
+        val builder = request.newBuilder().removeHeader(AUTHORIZATION).tag(PairedCredentials::class.java, snapshot)
+        usableToken(snapshot.token)?.let { builder.header(AUTHORIZATION, "Bearer $it") }
+        val response = chain.proceed(builder.build())
+        if (response.code == 401 && sameOrigin(response.request.url, snapshot.base)) onUnauthorized()
+        return response
     }
 
     override fun toString(): String = "PairedServerGate"
@@ -113,7 +117,11 @@ class RedirectGuardInterceptor(private val baseUrl: () -> HttpUrl?) : Intercepto
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         enforceUrlPolicy(request.url)
-        val base = baseUrl() ?: throw NotPairedException("Not paired with a server")
+        // The base captured at the start of the call (request tag, set by the shared client's gate) wins over the
+        // supplier, so a re-pair or unpair in mid-flight can never move a hop to a different "paired" origin.
+        val base = request.tag(PairedCredentials::class.java)?.base
+            ?: baseUrl()
+            ?: throw NotPairedException("Not paired with a server")
         if (request.url.scheme != base.scheme) {
             throw UrlPolicyViolation("Request blocked: redirect to a different scheme")
         }

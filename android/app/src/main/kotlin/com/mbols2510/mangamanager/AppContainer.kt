@@ -52,33 +52,41 @@ class AppContainer internal constructor(
 
     /**
      * THE OkHttpClient of the app (API calls and, in Task 10, Coil): built once, never null, never rebuilt, and it
-     * reads nothing to be built. The paired base URL and the token come from the in-memory caches on every
-     * request, and a request fails with `NotPairedException` (no socket opened) while the caches are cold, nothing
-     * is paired, or the destination is not the paired origin. Safe to call and to use from any thread, including
-     * the main thread: no DataStore, no Keystore, no lock shared with them.
+     * reads nothing to be built. Per request it reads ONE [credentials] snapshot (base URL and token together,
+     * from memory) and fails with `NotPairedException` (no socket opened) while nothing is published or the
+     * destination is not the paired origin. Safe to call and to use from any thread, including the main thread:
+     * no DataStore, no Keystore, no lock shared with them.
      */
     private val sharedClient: OkHttpClient by lazy {
-        MangaApiFactory.sharedClient(
-            baseUrl = baseUrl,
-            token = { tokenStore.cachedToken },
-            onUnauthorized = authState::markUnauthorized,
-        )
+        MangaApiFactory.sharedClient(credentials = credentials::get, onUnauthorized = authState::markUnauthorized)
     }
 
     fun httpClient(): OkHttpClient = sharedClient
 
-    /** Fills both in-memory caches (Keystore decrypt, DataStore read). Blocking: call on `Dispatchers.IO`. */
+    /**
+     * Fills the in-memory caches (Keystore decrypt, DataStore read) and publishes the stored pairing, if both parts
+     * are present, unless a pairing or unpairing already ran. Blocking: call on `Dispatchers.IO`.
+     */
     suspend fun warmUp() {
         tokenStore.warmUp()
         settingsStore.warmUp()
+        val base = baseUrl()
+        val token = tokenStore.cachedToken
+        if (base != null && token != null) credentials.publishIfUntouched(base, token)
+    }
+
+    /** Unpairs: the request path stops first, then the persisted token and URL are removed. Call on IO. */
+    suspend fun unpair() {
+        credentials.clear()
+        tokenStore.clear()
+        settingsStore.clearAll()
     }
 
     /** API supplier for the repository: Offline-by-exception while the caches are cold, null when not paired. */
     val pairingApi: StoredPairingApi by lazy {
         StoredPairingApi(
             ready = { settingsStore.isLoaded && tokenStore.isLoaded },
-            baseUrl = baseUrl,
-            hasToken = { tokenStore.cachedToken != null },
+            credentials = credentials::get,
             client = sharedClient,
         )
     }

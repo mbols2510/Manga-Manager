@@ -85,6 +85,7 @@ class AppContainerTest {
     private fun pair(container: AppContainer, server: MockWebServer, token: String) = runBlocking {
         container.settingsStore.setServerUrl(server.url("/").toString())
         container.tokenStore.save(token)
+        container.credentials.set(server.url("/"), token) // what a successful pairing publishes
     }
 
     @Test
@@ -114,10 +115,7 @@ class AppContainerTest {
 
         pair(container, server(), "tok_first_0123456789")
         assertSame("pairing does not rebuild the client", first, container.httpClient())
-        runBlocking {
-            container.settingsStore.clearAll()
-            container.tokenStore.clear()
-        }
+        runBlocking { container.unpair() }
         assertSame("unpairing does not rebuild the client", first, container.httpClient())
     }
 
@@ -152,6 +150,22 @@ class AppContainerTest {
     }
 
     @Test
+    fun warm_up_publishes_the_stored_pairing_but_never_over_a_newer_one() {
+        val a = server()
+        val tokens = FakeTokenStore().apply { token = "tok_stored_0123456789" }
+        val container = AppContainer(context, FakeSettingsStore(a.url("/").toString()), tokens)
+        runBlocking { container.warmUp() }
+        assertEquals("tok_stored_0123456789", container.credentials.get()!!.token)
+        assertEquals(a.url("/"), container.credentials.get()!!.base)
+
+        // A pairing (or unpairing) that ran before a late warm-up wins.
+        val other = AppContainer(context, FakeSettingsStore(a.url("/").toString()), tokens)
+        other.credentials.clear()
+        runBlocking { other.warmUp() }
+        assertNull(other.credentials.get())
+    }
+
+    @Test
     fun writes_update_the_cache_and_unpairing_clears_it() {
         val container = AppContainer(context, FakeSettingsStore(), FakeTokenStore())
         val store = container.settingsStore
@@ -173,9 +187,9 @@ class AppContainerTest {
         container.httpClient().get(a.url("/api/status"))
         assertEquals("Bearer tok_first_0123456789", a.takeRequest().getHeader("Authorization"))
 
-        container.tokenStore.clear()
-        runBlocking { container.settingsStore.clearAll() }
+        runBlocking { container.unpair() }
 
+        assertNull(container.credentials.get())
         assertNull(container.tokenStore.cachedToken)
         assertNull(container.settingsStore.cachedServerUrl)
         assertNull("no API when unpaired", container.pairingApi())

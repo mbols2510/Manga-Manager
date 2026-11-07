@@ -21,6 +21,7 @@ import com.mbols2510.mangamanager.data.api.TrashEntryDto
 import com.mbols2510.mangamanager.data.api.UpdateDto
 import com.mbols2510.mangamanager.data.api.UpdatesPageDto
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
+import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
 import com.mbols2510.mangamanager.data.db.AppDatabase
 import com.mbols2510.mangamanager.data.db.RoomUpdatesCache
 import com.mbols2510.mangamanager.data.db.SyncState
@@ -46,6 +47,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -417,34 +419,42 @@ class UpdatesRepositoryTest {
     }
 
     @Test
-    fun stored_pairing_api_checks_url_reads_token_lazily_and_routes_401() = runBlocking {
-        val tokens = object : TokenStore {
-            var value: String? = null
-            override fun save(token: String) { value = token }
-            override fun load(): String? = value
-            override fun clear() { value = null }
-        }
-        var url: String? = base.toString()
-        val provider = StoredPairingApi({ url }, tokens, auth)
-        assertNull("no token stored: not paired", provider())
+    fun stored_pairing_api_uses_the_published_snapshot_and_routes_401() = runBlocking {
+        val holder = PairedCredentialsHolder()
+        val client = MangaApiFactory.sharedClient(holder::get, auth::markUnauthorized)
+        var ready = false
+        val provider = StoredPairingApi({ ready }, holder::get, client)
+        assertThrows("cold caches: Offline by exception, not 'not paired'", IllegalStateException::class.java) { provider() }
 
-        tokens.save("first")
+        ready = true
+        assertNull("nothing published: not paired", provider())
+
+        holder.set(base, "first")
         val api = provider()!!
-        assertSame("same URL reuses the client", api, provider())
+        assertSame("same base reuses the API", api, provider())
         server.enqueue(latest(1))
         api.latest()
         assertEquals("Bearer first", take().getHeader("Authorization"))
 
-        tokens.save("second")
+        holder.set(base, "second") // a re-pair publishes base and token together
         server.enqueue(MockResponse().setResponseCode(401))
-        runCatching { api.latest() }
-        assertEquals("token is read on every request", "Bearer second", take().getHeader("Authorization"))
+        runCatching { provider()!!.latest() }
+        assertEquals("the published token is used", "Bearer second", take().getHeader("Authorization"))
         assertTrue("any 401 through the provider sets needsRepair", auth.needsRepair.value)
 
-        url = "http://example.com/"
-        assertNull("a stored URL that fails UrlPolicy gives no client", provider())
-        url = null
+        holder.clear()
         assertNull(provider())
+    }
+
+    @Test
+    fun paired_base_url_applies_url_policy_and_normalizes() {
+        var stored: String? = "http://example.com/"
+        val pairedBase = PairedBaseUrl { stored }
+        assertNull("a stored URL that fails UrlPolicy gives no base", pairedBase())
+        stored = "http://192.168.1.5:5000"
+        assertEquals("http://192.168.1.5:5000/", pairedBase()!!.toString())
+        stored = null
+        assertNull(pairedBase())
     }
 
     // ---------------------------------------------------------------- fix round 1

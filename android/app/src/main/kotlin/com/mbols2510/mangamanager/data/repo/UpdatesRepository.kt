@@ -6,6 +6,7 @@ import com.mbols2510.mangamanager.core.UrlPolicy
 import com.mbols2510.mangamanager.data.api.ChangesDto
 import com.mbols2510.mangamanager.data.api.MangaApi
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
+import com.mbols2510.mangamanager.data.api.PairedCredentials
 import com.mbols2510.mangamanager.data.api.UpdateDto
 import com.mbols2510.mangamanager.data.api.sameOrigin
 import com.mbols2510.mangamanager.data.db.SyncState
@@ -237,37 +238,28 @@ class PairedBaseUrl(private val stored: () -> String?) : () -> HttpUrl? {
 }
 
 /**
- * Production [MangaApi] supplier for the stored pairing, over the ONE shared [client]. The base URL is resolved
- * when the supplier is called ([baseUrl] is a memory read), so a re-pair to a different server only builds a new
- * Retrofit instance over the same client; the client is never rebuilt. Returns null when not paired or the stored
- * URL is no longer acceptable. While [ready] is false (the in-memory pairing cache is not filled yet) it throws,
- * which the repository reports as Offline instead of "not paired".
- * Nothing here reads storage or the Keystore, and no lock is held across anything slow.
+ * Production [MangaApi] supplier for the stored pairing, over the ONE shared [client]. It reads the published
+ * [credentials] snapshot once per call and builds one Retrofit instance per distinct paired URL over the same
+ * client (a re-pair to another server never rebuilds the client). Returns null when nothing is paired. While
+ * [ready] is false (the in-memory pairing caches are not filled yet) it throws, which the repository reports as
+ * Offline instead of "not paired". Nothing here reads storage or the Keystore, and the lock guards only the
+ * Retrofit cache.
  */
 class StoredPairingApi(
     private val ready: () -> Boolean,
-    private val baseUrl: () -> HttpUrl?,
-    private val hasToken: () -> Boolean,
+    private val credentials: () -> PairedCredentials?,
     private val client: OkHttpClient,
 ) : () -> MangaApi? {
-    /** Self-contained form: its own shared client over [storedUrl] and [tokenStore] (reads must be non-blocking). */
-    constructor(storedUrl: () -> String?, tokenStore: TokenStore, authState: AuthState) :
-        this(PairedBaseUrl(storedUrl), tokenStore, authState)
-
-    private constructor(base: PairedBaseUrl, tokenStore: TokenStore, authState: AuthState) : this(
-        ready = { true },
-        baseUrl = base,
-        hasToken = { tokenStore.load() != null },
-        client = MangaApiFactory.sharedClient(base, tokenStore::load, authState::markUnauthorized),
-    )
-
     private val lock = Any()
     private var cached: Pair<HttpUrl, MangaApi>? = null
 
     override fun invoke(): MangaApi? {
-        check(ready()) { "Pairing settings are not loaded yet" }
-        val base = baseUrl() ?: return null
-        if (!hasToken()) return null
+        val snapshot = credentials()
+        if (snapshot == null) {
+            check(ready()) { "Pairing settings are not loaded yet" }
+            return null
+        }
+        val base = snapshot.base
         synchronized(lock) {
             cached?.let { (u, api) -> if (u == base) return api }
             val api = MangaApiFactory.retrofit(base, client).create(MangaApi::class.java)
