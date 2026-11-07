@@ -1,3 +1,5 @@
+import com.android.build.api.artifact.SingleArtifact
+
 // AGP 9 compiles Kotlin itself (built-in Kotlin), so org.jetbrains.kotlin.android is not applied.
 plugins {
     alias(libs.plugins.android.application)
@@ -127,3 +129,38 @@ tasks.register("verifyReleaseHardening") {
     }
 }
 tasks.named("check") { dependsOn("verifyReleaseHardening") }
+
+// Ruling 12b: the MERGED release manifest (what actually ships, including library
+// contributions) must match an explicit allowlist. The checker is a plain Kotlin class in
+// src/test (MergedManifestChecker), also covered by fixture tests in MergedManifestCheckerTest;
+// this task runs that same class against the release variant's merged manifest.
+abstract class MergedManifestCheckArgs : CommandLineArgumentProvider {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val manifest: RegularFileProperty
+
+    @get:Input
+    abstract val applicationId: Property<String>
+
+    override fun asArguments(): Iterable<String> =
+        listOf(manifest.get().asFile.absolutePath, applicationId.get())
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        val checkArgs = objects.newInstance<MergedManifestCheckArgs>().apply {
+            manifest.set(variant.artifacts.get(SingleArtifact.MERGED_MANIFEST))
+            applicationId.set(variant.applicationId)
+        }
+        val taskName = "check${variant.name.replaceFirstChar { it.uppercase() }}MergedManifest"
+        val checkTask = tasks.register<JavaExec>(taskName) {
+            group = "verification"
+            description = "Checks permissions and exported components of the merged ${variant.name} manifest."
+            // The checker lives in src/test; the debug unit-test classpath has it plus the Kotlin stdlib.
+            classpath = tasks.named<Test>("testDebugUnitTest").get().classpath
+            mainClass.set("com.mbols2510.mangamanager.manifest.MergedManifestChecker")
+            argumentProviders.add(checkArgs)
+        }
+        tasks.named("check") { dependsOn(checkTask) }
+    }
+}

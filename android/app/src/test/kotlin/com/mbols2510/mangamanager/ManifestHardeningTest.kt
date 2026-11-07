@@ -16,6 +16,7 @@ import org.w3c.dom.Element
 class ManifestHardeningTest {
 
     private val androidNs = "http://schemas.android.com/apk/res/android"
+    private val toolsNs = "http://schemas.android.com/tools"
 
     private val componentTags = listOf("activity", "activity-alias", "service", "receiver", "provider")
 
@@ -54,11 +55,16 @@ class ManifestHardeningTest {
     private fun Element.androidAttr(name: String): String? =
         if (hasAttributeNS(androidNs, name)) getAttributeNS(androidNs, name) else null
 
+    /** `tools:node="remove"` elements strip library contributions; they are not declarations. */
+    private fun Element.isRemovalMarker(): Boolean = getAttributeNS(toolsNs, "node") == "remove"
+
+    private fun Element.declared(tag: String): List<Element> = children(tag).filterNot { it.isRemovalMarker() }
+
     private val application: Element
         get() = manifest.documentElement.children("application").single()
 
     private val components: List<Element>
-        get() = componentTags.flatMap { application.children(it) }
+        get() = componentTags.flatMap { application.declared(it) }
 
     private fun Element.isLauncher(): Boolean = children("intent-filter").any { filter ->
         filter.children("action").any { it.androidAttr("name") == "android.intent.action.MAIN" } &&
@@ -73,8 +79,15 @@ class ManifestHardeningTest {
     }
 
     @Test
+    fun application_is_not_debuggable_and_has_no_network_security_config() {
+        assertEquals("source manifest must not set android:debuggable", null, application.androidAttr("debuggable"))
+        assertEquals("no networkSecurityConfig (cleartext is decided in UrlPolicy)",
+            null, application.androidAttr("networkSecurityConfig"))
+    }
+
+    @Test
     fun only_launcher_activity_is_exported() {
-        val launchers = application.children("activity").filter { it.isLauncher() }
+        val launchers = application.declared("activity").filter { it.isLauncher() }
         assertEquals("exactly one launcher activity", 1, launchers.size)
         assertEquals("true", launchers.single().androidAttr("exported"))
 
@@ -93,8 +106,8 @@ class ManifestHardeningTest {
 
     @Test
     fun permissions_are_limited_to_allowed_set() {
-        val requested = (manifest.documentElement.children("uses-permission") +
-            manifest.documentElement.children("uses-permission-sdk-23"))
+        val requested = (manifest.documentElement.declared("uses-permission") +
+            manifest.documentElement.declared("uses-permission-sdk-23"))
             .map { it.androidAttr("name") }
             .toSet()
         assertEquals(allowedPermissions, requested)

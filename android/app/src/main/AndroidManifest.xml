@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Hardened manifest (spec 7.4), checked by ManifestHardeningTest:
-  - exactly INTERNET, ACCESS_NETWORK_STATE, POST_NOTIFICATIONS;
+  Hardened manifest (spec 7.4), checked by ManifestHardeningTest (this source file) and by
+  the checkReleaseMergedManifest Gradle task (merged release manifest, library additions included):
+  - the app itself declares exactly INTERNET, ACCESS_NETWORK_STATE, POST_NOTIFICATIONS;
   - no backup or device transfer of any app data;
   - only the launcher activity is exported; no custom URL scheme or deep links.
   Cleartext traffic stays at the platform default (blocked); UrlPolicy owns that decision.
@@ -12,6 +13,13 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Removal markers (tools:node="remove"), not declarations: WorkManager merges in a
+         foreground service and its permission; the app never runs foreground or expedited
+         work, so both are stripped (Ruling 12b, checked by checkReleaseMergedManifest). -->
+    <uses-permission
+        android:name="android.permission.FOREGROUND_SERVICE"
+        tools:node="remove" />
 
     <application
         android:allowBackup="false"
@@ -30,5 +38,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            tools:node="remove" />
     </application>
 </manifest>

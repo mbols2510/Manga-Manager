@@ -21,6 +21,7 @@
 - No foreground service, wake locks, exact alarms or custom receivers. No timer-based refresh. No background cover prefetch.
 - HTTP allowed only for loopback, RFC1918, `100.64.0.0/10`, link-local and `*.local`. HTTP to a public host is blocked. HTTPS to HTTP redirects refused. `Authorization` never forwarded to another host. No "trust all certificates" option.
 - `android:allowBackup="false"`, `dataExtractionRules` excluding all app data, only the launcher activity exported, no custom URL scheme, immutable `PendingIntent`s, permissions limited to `INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS` (+ `CAMERA` only if in-app QR scanning is used). Release: not debuggable, R8 on, logging stripped.
+- Never call WorkManager `setExpedited`, `setForeground` or `ForegroundInfo` (the SystemForegroundService is stripped; on API 26-30 expedited work needs it).
 - Sensitive items (server `mature` categories) use `VISIBILITY_PRIVATE` with a generic public text, no title and no cover in notifications.
 - Existing dashboard, ntfy and Discord behavior must not change; the existing pytest suite must stay green.
 
@@ -208,6 +209,7 @@
   - Sensitive: `sensitive_items_use_private_visibility_and_generic_public_text_without_title_or_cover`, `mixed_group_with_any_sensitive_item_hides_all_titles_in_public_version`
   - `SchedulerTest`: `interval_below_15_is_clamped_to_15`, `interval_above_360_is_clamped`, `null_interval_cancels_work`, `wifi_only_uses_unmetered`, `exactly_one_unique_work_exists_after_two_applies`, `battery_not_low_constraint_present`
   - Review Focus 4: `worker_after_401_does_not_reschedule_itself`
+  - `no_expedited_or_foreground_work_calls_in_source` (a unit test that scans `app/src/main` for `setExpedited`, `setForeground` and `ForegroundInfo` and fails on any hit)
   - Quiet hours (`CheckSettings` gains `quietHours: LocalTimeRange?`, read by the worker through `SettingsStore`): `quiet_hours_cache_items_but_post_no_notification`, `items_cached_during_quiet_hours_are_not_notified_later_as_new`, `night_stretch_applies_2h_interval_only_inside_quiet_hours`
 - [ ] **Step 2: Run.** Expected: FAIL.
 - [ ] **Step 3: Implement** the notification channels (`updates`, `updates_sensitive`, `system`), group summary, immutable `PendingIntent` to the feed. The worker never starts a foreground service.
@@ -269,4 +271,5 @@
 - [ ] **Step 2: Run** the workflow on the branch. Expected: FAIL until release config exists.
 - [ ] **Step 3: Implement** the release workflow: triggered by a `android-v*` tag, signs with keystore secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`; never echoed), attaches `app-release.apk` and its `SHA-256` file to the GitHub Release. Write `android/BATTERY.md` with the exact adb commands: `adb shell dumpsys batterystats --reset`, 24 h idle, `adb shell dumpsys batterystats com.mbols2510.mangamanager`, `adb shell dumpsys jobscheduler | grep -A5 mangamanager` (expect exactly one job), `adb shell dumpsys power | grep -i wake` (expect no wake locks held by the app), plus a table to record results. Add the README "Android app" section (install APK, create device, pair, interval advice).
 - [ ] **Step 4: Run** the full pipeline on the branch. Expected: PASS. Then run the manual end-to-end from spec §8 on a real phone and fill in `BATTERY.md`. If no device is available in this session, say so in the report and leave the table empty.
+- Also add `.github/dependabot.yml` (ecosystems `gradle` with directory `/android` and `github-actions`, both weekly). Dependabot does not regenerate `android/gradle/verification-metadata.xml`, so each Dependabot Gradle PR must be paired with the existing `write_verification_metadata` workflow flow (regenerate, review, commit the new checksums). README note: the CI debug APK artifact is debuggable and must not be used with a real device token.
 - [ ] **Step 5: Commit** `feat(android): release pipeline, battery guide and docs`.

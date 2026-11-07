@@ -101,7 +101,7 @@ Show the Room cache immediately, refresh once on open and on pull-to-refresh. No
 | Duplicates | Stable server IDs, Room upsert, notify only for IDs not seen before |
 
 ## 6. Battery budget
-- No foreground service, wake locks, exact alarms or custom receivers. One unique `PeriodicWorkRequest`.
+- The app's own code and source manifest use no foreground service, wake locks, exact alarms or custom receivers. One unique `PeriodicWorkRequest`. WorkManager's own merged-in `WAKE_LOCK` and `RECEIVE_BOOT_COMPLETED` (so the periodic job survives reboots) are accepted; its `FOREGROUND_SERVICE` permission and `SystemForegroundService` are stripped, so expedited and foreground work are not allowed.
 - Interval: default 30 min, range 15 min – 6 h, or off. Flex about 25%. Optional night stretch to 2 h during quiet hours.
 - Constraints: `CONNECTED` (or `UNMETERED` when Wi-Fi only) and `requiresBatteryNotLow`.
 - Exponential backoff capped at the interval. 10 s connect, 15 s read timeouts.
@@ -140,7 +140,7 @@ Show the Room cache immediately, refresh once on open and on pull-to-refresh. No
 - The pairing code is shown once as a QR and a copyable string, with the server URL embedded. It is a **one-time display**, not a link: the app does **not** register a custom URL scheme or exported deep-link activity, so another app cannot intercept the token through an intent.
 - The token is stored encrypted with an Android Keystore AES-GCM key (non-exportable, hardware-backed where available). `android:allowBackup="false"` and `dataExtractionRules` exclude all app data from cloud and device-transfer backup.
 - Tokens are never passed in URLs or query strings, only in the `Authorization` header (thumbnails use the interceptor).
-- All components are non-exported except the launcher activity. Notification actions use immutable `PendingIntent`s. The app requests only `INTERNET`, `ACCESS_NETWORK_STATE` and `POST_NOTIFICATIONS` (plus `CAMERA` only if in-app QR scanning is used, requested at use).
+- In the app's own code and source manifest, all components are non-exported except the launcher activity, and the app requests only `INTERNET`, `ACCESS_NETWORK_STATE` and `POST_NOTIFICATIONS` (plus `CAMERA` only if in-app QR scanning is used, requested at use). Notification actions use immutable `PendingIntent`s. Accepted merged-in library items, enforced by an allowlist check on the merged release manifest: `WAKE_LOCK` and `RECEIVE_BOOT_COMPLETED` from WorkManager so the periodic job survives reboots; the androidx.core `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` signature permission; and exported WorkManager/profileinstaller components guarded by system permissions (`SystemJobService` with `BIND_JOB_SERVICE`, `DiagnosticsReceiver` and `ProfileInstallReceiver` with `DUMP`). `FOREGROUND_SERVICE` and `SystemForegroundService` are stripped, so expedited and foreground work are not allowed.
 - Release builds are not debuggable, with R8 enabled and logging stripped. OkHttp logging is disabled in release.
 
 ### 7.5 Sensitive content
