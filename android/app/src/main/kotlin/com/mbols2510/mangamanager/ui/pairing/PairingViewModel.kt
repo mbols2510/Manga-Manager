@@ -2,6 +2,7 @@ package com.mbols2510.mangamanager.ui.pairing
 
 import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
 import com.mbols2510.mangamanager.R
 import com.mbols2510.mangamanager.core.PairingCode
 import com.mbols2510.mangamanager.core.TokenStore
@@ -48,8 +49,11 @@ object FactoryLatestCall : LatestCall {
         MangaApiFactory.create(baseUrl, token = { token }).latest()
 }
 
-/** TDD stub: behavior arrives in the next commit. */
-@Suppress("UNUSED_PARAMETER", "unused")
+/**
+ * Pairing flow (spec 7.3, 7.4, 7.6): parse the code, check the URL, probe whether the server enforces
+ * authentication, validate the candidate token, and only then store token and URL and take the baseline cursor.
+ * Any failure after storing rolls both back. Nothing here logs.
+ */
 class PairingViewModel(
     private val tokenStore: TokenStore,
     private val settings: SettingsStore,
@@ -61,9 +65,108 @@ class PairingViewModel(
     private val _state = MutableStateFlow<PairingUiState>(PairingUiState.Idle)
     val state: StateFlow<PairingUiState> = _state.asStateFlow()
 
-    fun submit(code: String) = Unit
+    /** The parsed candidate while the auth-disabled confirmation is open. Held only in memory. */
+    private var pending: Candidate? = null
 
-    fun confirmAuthDisabled() = Unit
+    fun submit(code: String) {
+        if (_state.value == PairingUiState.Validating) return
+        pending = null
+        val pairing = PairingCode.parse(code) ?: return fail(R.string.pairing_error_invalid_code)
+        val base = when (val checked = UrlPolicy.check(pairing.url)) {
+            is UrlCheck.Ok -> checked.normalized
+            is UrlCheck.Rejected -> return fail(R.string.pairing_error_rejected_url, checked.reason)
+        }
+        val candidate = Candidate(base, pairing.token)
+        _state.value = PairingUiState.Validating
+        viewModelScope.launch { probeThenPair(candidate) }
+    }
 
-    fun dismissAuthDisabled() = Unit
+    /** The "I understand" override. Only reachable for a private host (see [probeThenPair]). */
+    fun confirmAuthDisabled() {
+        val candidate = pending ?: return
+        pending = null
+        if (_state.value !is PairingUiState.ConfirmAuthDisabled || !UrlPolicy.isPrivateHost(candidate.base.host)) return
+        _state.value = PairingUiState.Validating
+        viewModelScope.launch { pair(candidate) }
+    }
+
+    /** Declining the override is the default: refuse to pair. */
+    fun dismissAuthDisabled() {
+        pending = null
+        if (_state.value is PairingUiState.ConfirmAuthDisabled) fail(R.string.pairing_error_auth_disabled)
+    }
+
+    private suspend fun probeThenPair(candidate: Candidate) {
+        when (probe(candidate.base)) {
+            Probe.AUTH_ENABLED -> pair(candidate)
+            Probe.AUTH_DISABLED ->
+                if (UrlPolicy.isPrivateHost(candidate.base.host)) {
+                    pending = candidate
+                    _state.value = PairingUiState.ConfirmAuthDisabled(candidate.base.host)
+                } else {
+                    fail(R.string.pairing_error_auth_disabled)
+                }
+            Probe.FAILED -> fail(R.string.pairing_error_connection)
+        }
+    }
+
+    /** Unauthenticated probe: 401 means the server enforces auth; a 200 means anyone can use its API. */
+    private suspend fun probe(base: HttpUrl): Probe = try {
+        latestCall.latest(base, null)
+        Probe.AUTH_DISABLED
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: HttpException) {
+        if (e.code() == 401) Probe.AUTH_ENABLED else Probe.FAILED
+    } catch (_: Exception) {
+        Probe.FAILED
+    }
+
+    private suspend fun pair(candidate: Candidate) {
+        try {
+            latestCall.latest(candidate.base, candidate.token)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HttpException) {
+            return if (e.code() == 401) {
+                fail(R.string.pairing_error_rejected_code)
+            } else {
+                fail(R.string.pairing_error_server, e.code().toString())
+            }
+        } catch (_: Exception) {
+            return fail(R.string.pairing_error_connection)
+        }
+
+        try {
+            withContext(ioDispatcher) {
+                tokenStore.save(candidate.token)
+                settings.setServerUrl(candidate.base.toString())
+                authState.clear()
+                // The first background check must never notify about items that existed before pairing.
+                repository.baseline()
+            }
+        } catch (e: CancellationException) {
+            rollBack()
+            throw e
+        } catch (_: Exception) {
+            rollBack()
+            return fail(R.string.pairing_error_store)
+        }
+        _state.value = PairingUiState.Success
+    }
+
+    private suspend fun rollBack() = withContext(NonCancellable + ioDispatcher) {
+        runCatching { tokenStore.clear() }
+        runCatching { settings.setServerUrl(null) }
+    }
+
+    private fun fail(@StringRes message: Int, detail: String? = null) {
+        _state.value = PairingUiState.Error(message, detail)
+    }
+
+    private enum class Probe { AUTH_ENABLED, AUTH_DISABLED, FAILED }
+
+    private class Candidate(val base: HttpUrl, val token: String) {
+        override fun toString(): String = "Candidate(base=$base, token=<redacted>)"
+    }
 }
