@@ -7,7 +7,10 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
-data class Pairing(val url: String, val token: String)
+data class Pairing(val url: String, val token: String) {
+    // Never print the token (logs, crash reports, debuggers' string views).
+    override fun toString(): String = "Pairing(url=$url, token=<redacted>)"
+}
 
 /**
  * Parses the one-time code shown by the server: `mm1.` + base64url(JSON `{"v":1,"url":..,"token":..}`).
@@ -16,6 +19,7 @@ data class Pairing(val url: String, val token: String)
  */
 object PairingCode {
     private const val PREFIX = "mm1."
+    private const val MAX_INPUT_CHARS = 4096
 
     fun parse(raw: String): Pairing? = try {
         parseOrThrow(raw)
@@ -24,6 +28,7 @@ object PairingCode {
     }
 
     private fun parseOrThrow(raw: String): Pairing? {
+        if (raw.length > MAX_INPUT_CHARS) return null
         // QR scanners and pasted text wrap lines, so drop every whitespace character.
         val compact = raw.filterNot { it.isWhitespace() }
         if (!compact.startsWith(PREFIX)) return null

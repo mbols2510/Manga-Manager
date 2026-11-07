@@ -48,9 +48,11 @@ object UrlPolicy {
     fun isUnencrypted(url: HttpUrl): Boolean = url.scheme == "http"
 
     fun isPrivateHost(host: String): Boolean {
-        val h = host.trim().removePrefix("[").removeSuffix("]").lowercase().trimEnd('.')
-        if (h.isEmpty()) return false
-        if (h == "localhost" || h.endsWith(".local")) return true
+        val h = host.trim().removePrefix("[").removeSuffix("]").lowercase()
+        // A trailing dot makes the system resolver do a DNS lookup (also for IP literals and
+        // localhost), so such hosts are never private. Same for empty labels.
+        if (h.isEmpty() || h.endsWith(".") || h.startsWith(".") || h.contains("..")) return false
+        if (h == "localhost" || (h.length > ".local".length && h.endsWith(".local"))) return true
         parseIpv4(h)?.let { return isPrivateV4(it) }
         parseIpv6(h)?.let { return isPrivateV6(it) }
         return false
