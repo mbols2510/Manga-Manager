@@ -98,9 +98,9 @@ class PairingCodeTest {
     fun input_size_is_capped() {
         assertNull(PairingCode.parse("mm1." + "A".repeat(5_000_000)))
         assertNull(PairingCode.parse("mm1." + "A".repeat(4093)))
-        val big = code("""{"v":1,"url":"https://e.com","token":"${"x".repeat(2500)}"}""")
+        val big = code("""{"v":1,"url":"https://e.com","token":"${"x".repeat(2700)}"}""")
         assertEquals(true, big.length in 3500..4096)
-        assertEquals("x".repeat(2500), PairingCode.parse(big)?.token)
+        assertEquals("x".repeat(2700), PairingCode.parse(big)?.token)
         val tooBig = code("""{"v":1,"url":"https://e.com","token":"${"x".repeat(3100)}"}""")
         assertEquals(true, tooBig.length > 4096)
         assertNull(PairingCode.parse(tooBig))
