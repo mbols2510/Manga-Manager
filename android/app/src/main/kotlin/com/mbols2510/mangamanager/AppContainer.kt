@@ -91,7 +91,9 @@ class AppContainer internal constructor(
      * `Scheduler.apply` uses the UPDATE policy, so an unchanged schedule keeps its timing. Call on IO.
      */
     suspend fun scheduleChecksIfPaired() {
-        if (credentials.get() != null && !authState.needsRepair.value) scheduler.apply(settingsStore.checkSettings())
+        // The PERSISTED flag decides (the worker sets it on a 401 and cancels the work); never re-schedule over it.
+        if (credentials.get() == null || authState.needsRepair.value || settingsStore.needsRepair()) return
+        scheduler.apply(settingsStore.checkSettings())
     }
 
     /** After a successful (re-)pairing, which has cleared the repair flag: schedule the periodic check. Call on IO. */

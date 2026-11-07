@@ -34,7 +34,7 @@ class Scheduler(private val workManager: WorkManager) {
     companion object {
         const val UNIQUE_WORK_NAME = "manga_update_check"
 
-        /** First retry after 30 s, doubling; the worker stops retrying after [CheckWorker.MAX_RETRY_ATTEMPTS]. */
+        /** The single retry per period comes 30 s after a failure (the worker gives up from [CheckWorker.MAX_RETRY_ATTEMPTS]). */
         const val BACKOFF_SECONDS = 30L
 
         fun clampInterval(minutes: Int): Int =

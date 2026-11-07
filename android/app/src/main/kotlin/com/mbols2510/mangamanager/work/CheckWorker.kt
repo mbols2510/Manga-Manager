@@ -60,7 +60,11 @@ class CheckWorker(
             false
         }
         if (!warmed) return retryOrGiveUp()
-        if (!deps.isPaired()) return Result.success() // nothing to check; scheduling is the pairing flow's job
+        if (!deps.isPaired()) {
+            // Nothing to check, and nothing will be until a pairing (which schedules again): stop waking the device.
+            deps.scheduler.cancel()
+            return Result.success()
+        }
 
         val settings = deps.settings.checkSettings()
         val now = deps.clock.instant()
@@ -94,12 +98,21 @@ class CheckWorker(
                 retryOrGiveUp()
             }
             CheckResult.Unauthorized -> {
+                // First the state the app needs to open on the pairing screen, then the best-effort notice.
                 val alreadyFlagged = deps.settings.needsRepair()
                 deps.settings.setNeedsRepair(true)
                 deps.authState.markUnauthorized()
-                if (!alreadyFlagged) deps.notifier.notifyRepairNeeded()
-                // Last: cancelling the unique work also stops this run. Nothing reschedules until a new pairing.
-                deps.scheduler.cancel()
+                withContext(NonCancellable) {
+                    if (!alreadyFlagged) {
+                        try {
+                            deps.notifier.notifyRepairNeeded()
+                        } catch (_: RuntimeException) {
+                            false // the app still opens on the pairing screen; nothing depends on the notice
+                        }
+                    }
+                    // Last: cancelling the unique work also stops this run. Nothing reschedules until a new pairing.
+                    deps.scheduler.cancel()
+                }
                 Result.success()
             }
         }
@@ -115,11 +128,12 @@ class CheckWorker(
         // Posting and marking belong together: a stop in between would only re-post once (same tag, no re-alert).
         withContext(NonCancellable) {
             if (!inQuietHours) {
-                // false (unavailable) is a decision as well; an unexpected failure must not loop every period.
+                // false ("notifications unavailable") is a decision; an exception is not: the items stay pending
+                // and the next period's check tries again (ruling 22).
                 try {
                     deps.notifier.notifyUpdates(items)
                 } catch (_: RuntimeException) {
-                    false
+                    return@withContext
                 }
             }
             deps.repository.markNotified(items.map { it.id })
@@ -127,8 +141,11 @@ class CheckWorker(
     }
 
     companion object {
-        /** `runAttemptCount` from which a failed run returns success instead of retry (max backoff 30 s * 2^4 = 8 min). */
-        const val MAX_RETRY_ATTEMPTS = 5
+        /**
+         * `runAttemptCount` from which a failed run returns success instead of retry: ONE retry per period
+         * (ruling 22, after a 30 s backoff); an unreachable server then costs two runs per period, not six.
+         */
+        const val MAX_RETRY_ATTEMPTS = 1
         const val WARM_UP_TIMEOUT_MILLIS = 20_000L
         val NIGHT_STRETCH_MILLIS: Long = Duration.ofHours(2).toMillis()
     }

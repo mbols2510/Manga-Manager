@@ -149,7 +149,7 @@ class SchedulerTest {
         assertEquals(0L, spec.initialDelay)
         assertFalse(spec.expedited)
         assertEquals(CheckWorker::class.java.name, spec.workerClassName)
-        // The worker stops retrying at attempt 5, so the longest backoff (30 s * 2^4) stays below the 15 min minimum.
+        // The worker retries once per period (ruling 22), so the only backoff (30 s) stays far below the 15 min minimum.
         val longest = TimeUnit.SECONDS.toMillis(30) shl (CheckWorker.MAX_RETRY_ATTEMPTS - 1)
         assertTrue(longest < minutes(15))
     }

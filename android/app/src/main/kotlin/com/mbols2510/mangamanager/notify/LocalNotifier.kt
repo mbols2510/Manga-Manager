@@ -32,13 +32,15 @@ class LocalNotifier(context: Context) : Notifier {
 
     override fun notifyUpdates(items: List<UpdateEntity>): Boolean {
         if (items.isEmpty()) return false
-        val sensitive = items.any { it.sensitive }
-        val channel = if (sensitive) CHANNEL_UPDATES_SENSITIVE else CHANNEL_UPDATES
+        val text = NotificationText.summary(context.resources, items)
+        // The sensitive channel only for an all-sensitive batch: a mixed batch goes to `updates`, so hiding the
+        // sensitive channel never swallows ordinary alerts. Nothing leaks: sensitive titles are never listed and
+        // the public version is generic.
+        val channel = if (text.allSensitive) CHANNEL_UPDATES_SENSITIVE else CHANNEL_UPDATES
         // One tag per check (its newest id): a re-post of the same check after a crash replaces, and with
         // setOnlyAlertOnce does not alert twice, instead of stacking a duplicate.
         val tag = TAG_UPDATES_PREFIX + items.maxOf { it.id }
         return post(channel, tag, ID_UPDATES) {
-            val text = NotificationText.summary(context.resources, items)
             val publicVersion = NotificationCompat.Builder(context, channel)
                 .setSmallIcon(R.drawable.ic_notification)
                 .setContentTitle(text.publicTitle)
@@ -54,7 +56,6 @@ class LocalNotifier(context: Context) : Notifier {
                 .setNumber(items.size)
                 .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
                 .setPublicVersion(publicVersion)
-                .setGroup(GROUP_UPDATES)
                 .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
                 .setContentIntent(openAppIntent())
@@ -133,7 +134,6 @@ class LocalNotifier(context: Context) : Notifier {
         const val CHANNEL_UPDATES = "updates"
         const val CHANNEL_UPDATES_SENSITIVE = "updates_sensitive"
         const val CHANNEL_SYSTEM = "system"
-        const val GROUP_UPDATES = "com.mbols2510.mangamanager.UPDATES"
         const val TAG_UPDATES_PREFIX = "updates-"
         const val ID_UPDATES = 1
         const val ID_REPAIR = 2
