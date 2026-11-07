@@ -103,6 +103,8 @@ jobs:
           done
           cat "${files[@]}" | grep -o '<testsuite [^>]*' | sed -E 's/.* tests="([0-9]+)" skipped="([0-9]+)" failures="([0-9]+)" errors="([0-9]+)".*/\1 \2 \3 \4/' \
             | awk '{t+=$1; s+=$2; f+=$3; e+=$4} END {printf "TOTAL tests=%d skipped=%d failures=%d errors=%d\n", t, s, f, e}'
+          echo "Robolectric android-all jars fetched at test time (outside Gradle dependency verification):"
+          find ~/.m2/repository/org/robolectric -name 'android-all*.jar' 2>/dev/null | sed "s|$HOME/||" || true
           echo "Failed test cases:"
           for f in "${files[@]}"; do
             grep -A1 '<testcase ' "$f" | grep -B1 -E '<(failure|error) ' | grep -o 'testcase name="[^"]*" classname="[^"]*"' || true

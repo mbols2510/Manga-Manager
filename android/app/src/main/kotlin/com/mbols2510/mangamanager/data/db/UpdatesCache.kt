@@ -33,13 +33,17 @@ class RoomUpdatesCache internal constructor(
 
     override suspend fun setSyncState(state: SyncState) = dao.putSyncState(state)
 
-    // TDD stub (Task 7 RED): not atomic, and existing notified flags are lost.
-    override suspend fun applyChanges(items: List<UpdateEntity>, state: SyncState): List<UpdateEntity> {
-        dao.upsertAll(items)
-        afterUpsert()
-        dao.putSyncState(state)
-        return items
-    }
+    override suspend fun applyChanges(items: List<UpdateEntity>, state: SyncState): List<UpdateEntity> =
+        db.withTransaction {
+            val known = HashMap<Long, Boolean>()
+            items.map { it.id }.distinct().chunked(MAX_IDS_PER_QUERY).forEach { chunk ->
+                dao.notifiedFlags(chunk).forEach { known[it.id] = it.notified }
+            }
+            dao.upsertAll(items.map { it.copy(notified = known[it.id] ?: false) })
+            afterUpsert()
+            dao.putSyncState(state)
+            items.filter { it.id !in known }
+        }
 
     override suspend fun markNotified(ids: Collection<Long>) {
         if (ids.isEmpty()) return

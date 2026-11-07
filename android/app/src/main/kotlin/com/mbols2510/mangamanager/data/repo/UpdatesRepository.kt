@@ -69,12 +69,119 @@ class DefaultUpdatesRepository internal constructor(
 
     override val feed: Flow<List<UpdateEntity>> = cache.feed()
 
-    // TDD stub (Task 7 RED).
-    override suspend fun checkForChanges(): CheckResult = CheckResult.NoChange
+    override suspend fun checkForChanges(): CheckResult {
+        val client = api() ?: return unauthorized()
+        return try {
+            val state = cache.syncState()
+            if (state == null) {
+                // Fresh install: never start from since=0 (pruned servers answer 410), start at the newest id.
+                baselineWith(client)
+                CheckResult.NoChange
+            } else {
+                fetch(client, state)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: HttpException) {
+            if (e.code() == 401) unauthorized() else CheckResult.Offline
+        } catch (_: Exception) {
+            // IOException (offline, timeout, TLS, URL policy), unreadable JSON, a failed database write:
+            // nothing was committed, so the next check simply retries from the same cursor.
+            CheckResult.Offline
+        }
+    }
 
-    override suspend fun baseline() = Unit
+    override suspend fun baseline() {
+        val client = api() ?: run {
+            authState.markUnauthorized()
+            throw IllegalStateException("Device is not paired")
+        }
+        try {
+            baselineWith(client)
+        } catch (e: HttpException) {
+            if (e.code() == 401) authState.markUnauthorized()
+            throw e
+        }
+    }
 
     override suspend fun markNotified(ids: Collection<Long>) = cache.markNotified(ids)
+
+    private suspend fun baselineWith(client: MangaApi) {
+        val latest = client.latest()
+        check(latest.cursor >= 0) { "Server returned a negative cursor" }
+        cache.setSyncState(SyncState(cursor = latest.cursor, etag = null, lastSuccessAt = clock()))
+    }
+
+    private sealed interface Page {
+        data class Ok(val body: ChangesDto, val etag: String?) : Page
+        data class Stop(val result: CheckResult) : Page
+    }
+
+    private suspend fun page(client: MangaApi, since: Long, etag: String?): Page {
+        val response: Response<ChangesDto> = client.changes(since, pageSize, etag)
+        return when (response.code()) {
+            304 -> Page.Stop(CheckResult.NoChange)
+            401 -> Page.Stop(unauthorized())
+            410 -> {
+                // Cursor too old or the server was reset: new baseline, nothing older is reported.
+                baselineWith(client)
+                Page.Stop(CheckResult.NoChange)
+            }
+            200 -> {
+                val body = response.body() ?: return Page.Stop(CheckResult.Offline)
+                if (body.nextCursor < since) return Page.Stop(CheckResult.Offline)
+                Page.Ok(body, response.headers()["ETag"])
+            }
+            else -> Page.Stop(CheckResult.Offline)
+        }
+    }
+
+    private suspend fun fetch(client: MangaApi, state: SyncState): CheckResult {
+        val collected = LinkedHashMap<Long, UpdateDto>()
+        var cursor = state.cursor
+        var etag: String? = null
+        var pages = 0
+        var send: String? = state.etag
+        while (true) {
+            val page = when (val p = page(client, cursor, send)) {
+                is Page.Stop -> return p.result
+                is Page.Ok -> p
+            }
+            pages++
+            send = null // later pages never carry If-None-Match
+            for (item in page.body.items) {
+                collected.remove(item.id)
+                collected[item.id] = item
+            }
+            cursor = page.body.nextCursor
+            etag = page.etag
+            val more = page.body.hasMore && page.body.items.isNotEmpty()
+            if (!more) break
+            if (pages >= maxPages) {
+                etag = null // a capped walk did not reach the end; its ETag describes a page in the middle
+                break
+            }
+        }
+
+        if (collected.isEmpty()) {
+            // Nothing new. Only remember a changed ETag (one small write) so the next check can get a 304.
+            if (cursor != state.cursor || (etag != null && etag != state.etag)) {
+                cache.setSyncState(SyncState(cursor = cursor, etag = etag ?: state.etag, lastSuccessAt = clock()))
+            }
+            return CheckResult.NoChange
+        }
+
+        val fresh = cache.applyChanges(
+            items = collected.values.map { it.toEntity() },
+            state = SyncState(cursor = cursor, etag = etag, lastSuccessAt = clock()),
+        )
+        return if (fresh.isEmpty()) CheckResult.NoChange else CheckResult.NewItems(fresh.sortedBy { it.id })
+    }
+
+    private fun unauthorized(): CheckResult {
+        authState.markUnauthorized()
+        return CheckResult.Unauthorized
+    }
 
     companion object {
         const val PAGE_SIZE = 50
