@@ -57,3 +57,63 @@ class DataStoreSettingsStore internal constructor(private val store: DataStore<P
         val SERVER_URL = stringPreferencesKey("server_url")
     }
 }
+
+/**
+ * Keeps the server URL in memory so code that must not block (the shared OkHttp client, the repository's API
+ * supplier) can read it from any thread. Fill it with [warmUp] (off the main thread) at startup; every write
+ * through this store updates the cache after the delegate has stored the value.
+ */
+class CachingSettingsStore(private val delegate: SettingsStore) : SettingsStore {
+    private val lock = Any()
+
+    @Volatile
+    private var loaded = false
+
+    @Volatile
+    private var url: String? = null
+
+    /** True once the URL is known (read from the delegate or written through this store). */
+    val isLoaded: Boolean get() = loaded
+
+    /**
+     * The cached URL, never touching storage. Throws [IllegalStateException] until [isLoaded], so a caller that
+     * runs too early fails (the repository maps that to Offline) instead of reading "not paired".
+     */
+    fun requireCachedServerUrl(): String? {
+        check(loaded) { "Settings are not loaded yet" }
+        return url
+    }
+
+    suspend fun warmUp() {
+        serverUrl()
+    }
+
+    override val serverUrl: Flow<String?> get() = delegate.serverUrl
+
+    override suspend fun serverUrl(): String? {
+        val read = delegate.serverUrl()
+        synchronized(lock) {
+            // A write through this store that finished while the read was in flight is newer: keep it.
+            if (!loaded) {
+                url = read
+                loaded = true
+            }
+            return url
+        }
+    }
+
+    override suspend fun setServerUrl(url: String?) {
+        delegate.setServerUrl(url)
+        put(url)
+    }
+
+    override suspend fun clearAll() {
+        delegate.clearAll()
+        put(null)
+    }
+
+    private fun put(value: String?) = synchronized(lock) {
+        url = value
+        loaded = true
+    }
+}

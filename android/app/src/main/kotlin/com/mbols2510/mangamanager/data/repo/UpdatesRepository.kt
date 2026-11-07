@@ -235,15 +235,20 @@ class StoredPairingApi(
 
     private var cached: Built? = null
 
-    override fun invoke(): MangaApi? = current()?.api
+    /** The API for the stored pairing, or null when no token is stored (this reads the token store once). */
+    override fun invoke(): MangaApi? = current(requireToken = true)?.api
 
-    /** The OkHttpClient behind [invoke] (same token, interceptors and 401 routing), or null when not paired. */
-    fun client(): OkHttpClient? = current()?.client
+    /**
+     * The OkHttpClient behind [invoke] (same token, interceptors and 401 routing), or null when no acceptable URL
+     * is stored. It reads [storedUrl] but never the token store here: the token is read per request, on the
+     * thread that executes the request. [storedUrl] must therefore be cheap and non-blocking.
+     */
+    fun client(): OkHttpClient? = current(requireToken = false)?.client
 
     @Synchronized
-    private fun current(): Built? {
-        if (tokenStore.load() == null) return null
+    private fun current(requireToken: Boolean): Built? {
         val url = (UrlPolicy.check(storedUrl() ?: return null) as? UrlCheck.Ok)?.normalized ?: return null
+        if (requireToken && tokenStore.load() == null) return null
         cached?.let { if (it.url == url) return it }
         val client = MangaApiFactory.client(url, tokenStore::load, authState::markUnauthorized)
         val api = MangaApiFactory.retrofit(url, client).create(MangaApi::class.java)
