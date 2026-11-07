@@ -4,8 +4,6 @@ import com.mbols2510.mangamanager.core.UrlCheck
 import com.mbols2510.mangamanager.core.UrlPolicy
 import java.net.ProxySelector
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.SSLSocketFactory
-import javax.net.ssl.X509TrustManager
 import kotlinx.serialization.json.Json
 import okhttp3.HttpUrl
 import okhttp3.MediaType.Companion.toMediaType
@@ -47,9 +45,8 @@ object MangaApiFactory {
         baseUrl: HttpUrl,
         token: () -> String?,
         onUnauthorized: () -> Unit,
-        tls: Pair<SSLSocketFactory, X509TrustManager>? = null,
         maxBodyBytes: Long = MAX_BODY_BYTES,
-    ): MangaApi = retrofit(checkedBase(baseUrl), buildClient(baseUrl, token, onUnauthorized, tls, maxBodyBytes))
+    ): MangaApi = retrofit(checkedBase(baseUrl), buildClient(baseUrl, token, onUnauthorized, maxBodyBytes))
         .create(MangaApi::class.java)
 
     /** The configured client alone, e.g. for Coil to load `thumb/<id>.png` with the same rules and token. */
@@ -69,12 +66,11 @@ object MangaApiFactory {
             is UrlCheck.Rejected -> throw IllegalArgumentException("Server URL rejected: ${checked.reason}")
         }
 
-    /** [tls] and [maxBodyBytes] exist for tests only (a test CA, a small cap). */
+    /** [maxBodyBytes] is a test seam (a small cap). TLS always uses the platform defaults: system trust store, standard host checks. */
     internal fun buildClient(
         baseUrl: HttpUrl,
         token: () -> String?,
         onUnauthorized: () -> Unit,
-        tls: Pair<SSLSocketFactory, X509TrustManager>? = null,
         maxBodyBytes: Long = MAX_BODY_BYTES,
     ): OkHttpClient {
         val base = checkedBase(baseUrl)
@@ -89,7 +85,6 @@ object MangaApiFactory {
             .addInterceptor(AuthInterceptor(base, token, onUnauthorized))
             .addInterceptor(BodySizeLimitInterceptor(maxBodyBytes))
             .addNetworkInterceptor(RedirectGuardInterceptor(base))
-            .apply { tls?.let { (factory, trust) -> sslSocketFactory(factory, trust) } }
             .build()
     }
 }

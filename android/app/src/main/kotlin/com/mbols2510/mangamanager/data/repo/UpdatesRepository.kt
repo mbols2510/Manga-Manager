@@ -7,12 +7,15 @@ import com.mbols2510.mangamanager.data.api.ChangesDto
 import com.mbols2510.mangamanager.data.api.MangaApi
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
 import com.mbols2510.mangamanager.data.api.UpdateDto
+import com.mbols2510.mangamanager.data.api.sameOrigin
 import com.mbols2510.mangamanager.data.db.SyncState
 import com.mbols2510.mangamanager.data.db.UpdateEntity
 import com.mbols2510.mangamanager.data.db.UpdatesCache
 import com.mbols2510.mangamanager.data.db.toEntity
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl
 import retrofit2.HttpException
 import retrofit2.Response
@@ -69,9 +72,15 @@ class DefaultUpdatesRepository internal constructor(
 
     override val feed: Flow<List<UpdateEntity>> = cache.feed()
 
-    override suspend fun checkForChanges(): CheckResult {
-        val client = api() ?: return unauthorized()
+    /** Serializes checks: the worker and a foreground refresh must not interleave and write an older cursor back. */
+    private val checkLock = Mutex()
+
+    override suspend fun checkForChanges(): CheckResult = checkLock.withLock { checkOnce() }
+
+    private suspend fun checkOnce(): CheckResult {
         return try {
+            // Inside the try: a failing supplier (e.g. a storage read) is Offline, never a crash.
+            val client = api() ?: return unauthorized()
             val state = cache.syncState()
             if (state == null) {
                 // Fresh install: never start from since=0 (pruned servers answer 410), start at the newest id.
@@ -83,7 +92,7 @@ class DefaultUpdatesRepository internal constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: HttpException) {
-            if (e.code() == 401) unauthorized() else CheckResult.Offline
+            if (e.isOwn401()) unauthorized() else CheckResult.Offline
         } catch (_: Exception) {
             // IOException (offline, timeout, TLS, URL policy), unreadable JSON, a failed database write:
             // nothing was committed, so the next check simply retries from the same cursor.
@@ -99,7 +108,7 @@ class DefaultUpdatesRepository internal constructor(
         try {
             baselineWith(client)
         } catch (e: HttpException) {
-            if (e.code() == 401) authState.markUnauthorized()
+            if (e.isOwn401()) authState.markUnauthorized()
             throw e
         }
     }
@@ -121,7 +130,7 @@ class DefaultUpdatesRepository internal constructor(
         val response: Response<ChangesDto> = client.changes(since, pageSize, etag)
         return when (response.code()) {
             304 -> Page.Stop(CheckResult.NoChange)
-            401 -> Page.Stop(unauthorized())
+            401 -> Page.Stop(if (response.raw().isOwn401()) unauthorized() else CheckResult.Offline)
             410 -> {
                 // Cursor too old or the server was reset: new baseline, nothing older is reported.
                 baselineWith(client)
@@ -143,7 +152,8 @@ class DefaultUpdatesRepository internal constructor(
         var pages = 0
         var send: String? = state.etag
         while (true) {
-            val page = when (val p = page(client, cursor, send)) {
+            val since = cursor
+            val page = when (val p = page(client, since, send)) {
                 is Page.Stop -> return p.result
                 is Page.Ok -> p
             }
@@ -155,8 +165,12 @@ class DefaultUpdatesRepository internal constructor(
             }
             cursor = page.body.nextCursor
             etag = page.etag
-            val more = page.body.hasMore && page.body.items.isNotEmpty()
-            if (!more) break
+            if (!page.body.hasMore) break
+            if (page.body.items.isEmpty() || page.body.nextCursor <= since) {
+                // has_more without progress: stop instead of asking for the same page again.
+                etag = null
+                break
+            }
             if (pages >= maxPages) {
                 etag = null // a capped walk did not reach the end; its ETag describes a page in the middle
                 break
@@ -177,6 +191,19 @@ class DefaultUpdatesRepository internal constructor(
         )
         return if (fresh.isEmpty()) CheckResult.NoChange else CheckResult.NewItems(fresh.sortedBy { it.id })
     }
+
+    /**
+     * A 401 counts only when it came from the origin the call was sent to. After a redirect to another host the
+     * 401 is that host's and says nothing about our token (the token is never sent there).
+     */
+    private fun okhttp3.Response.isOwn401(): Boolean {
+        if (code != 401) return false
+        var first: okhttp3.Response = this
+        while (true) first = first.priorResponse ?: break
+        return sameOrigin(request.url, first.request.url)
+    }
+
+    private fun HttpException.isOwn401(): Boolean = response()?.raw()?.isOwn401() == true
 
     private fun unauthorized(): CheckResult {
         authState.markUnauthorized()

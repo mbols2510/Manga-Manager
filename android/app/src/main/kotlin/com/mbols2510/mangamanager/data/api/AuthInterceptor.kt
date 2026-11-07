@@ -43,7 +43,7 @@ internal fun sameOrigin(a: HttpUrl, b: HttpUrl): Boolean = a.scheme == b.scheme 
  * - checks [UrlPolicy] on the request URL before any network access;
  * - adds `Authorization: Bearer <token>` only when the request goes to the paired server ([baseUrl]'s origin),
  *   reading the token lazily; with no token it sends no header (the server then answers 401);
- * - calls [onUnauthorized] when the final answer is 401.
+ * - calls [onUnauthorized] when the final answer is a 401 from the paired server's origin.
  * It logs nothing, and [toString] does not expose the token.
  */
 class AuthInterceptor(
@@ -59,7 +59,8 @@ class AuthInterceptor(
             usableToken(token())?.let { builder.header(AUTHORIZATION, "Bearer $it") }
         }
         val response = chain.proceed(builder.build())
-        if (response.code == 401) onUnauthorized()
+        // Only the paired server's 401 says something about our token; a redirect target's 401 does not.
+        if (response.code == 401 && sameOrigin(response.request.url, baseUrl)) onUnauthorized()
         return response
     }
 
