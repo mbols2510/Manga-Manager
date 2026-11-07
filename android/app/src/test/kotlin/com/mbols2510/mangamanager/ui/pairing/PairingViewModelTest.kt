@@ -1,0 +1,276 @@
+package com.mbols2510.mangamanager.ui.pairing
+
+import com.mbols2510.mangamanager.R
+import com.mbols2510.mangamanager.data.FakeSettingsStore
+import com.mbols2510.mangamanager.data.repo.AuthState
+import java.io.IOException
+import java.net.InetAddress
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import retrofit2.HttpException
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class PairingViewModelTest {
+    private val dispatcher = UnconfinedTestDispatcher()
+    private val tokens = FakeTokenStore()
+    private val settings = FakeSettingsStore()
+    private val auth = AuthState()
+    private val server = FakeServer(validToken = TOKEN)
+    private var baselineFailure: Exception? = null
+    private var storedAtBaseline: Pair<String?, String?>? = null
+    private var vmRef: PairingViewModel? = null
+    private var stateAtBaseline: PairingUiState? = null
+    private val repo = FakeUpdatesRepository {
+        storedAtBaseline = tokens.token to settings.serverUrl()
+        stateAtBaseline = vmRef?.state?.value
+        baselineFailure?.let { throw it }
+    }
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(dispatcher)
+    }
+
+    @After
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
+    private fun viewModel() = PairingViewModel(tokens, settings, auth, repo, server, dispatcher).also { vmRef = it }
+
+    /** Records every state the ViewModel emits. */
+    private fun TestScope.recorded(vm: PairingViewModel): MutableList<PairingUiState> {
+        val states = mutableListOf<PairingUiState>()
+        backgroundScope.launch(dispatcher) { vm.state.collect { states += it } }
+        return states
+    }
+
+    private fun assertNothingStored() {
+        assertNull("token must not be stored", tokens.token)
+        assertEquals("token must never be saved", 0, tokens.saves)
+        assertNull("URL must not be stored", runBlocking { settings.serverUrl() })
+        assertEquals("no baseline", 0, repo.baselines)
+    }
+
+    @Test
+    fun valid_code_validates_stores_token_and_sets_baseline() = runTest(dispatcher) {
+        auth.markUnauthorized() // re-pair after a revoked token
+        val vm = viewModel()
+
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+
+        assertEquals(PairingUiState.Success, vm.state.value)
+        assertEquals("Validating shown while working", PairingUiState.Validating, stateAtBaseline)
+        assertEquals(TOKEN, tokens.token)
+        assertEquals("https://manga.example.com/", settings.serverUrl())
+        assertEquals(1, repo.baselines)
+        assertEquals("baseline runs after token and URL are stored", TOKEN to "https://manga.example.com/", storedAtBaseline)
+        assertFalse("a successful pairing clears needsRepair", auth.needsRepair.value)
+        assertEquals("probe without a token, then validation with the candidate",
+            listOf(null, TOKEN), server.calls.map { it.second })
+        assertEquals("https://manga.example.com/".toHttpUrl(), server.calls.last().first)
+    }
+
+    @Test
+    fun invalid_code_shows_error_and_stores_nothing() = runTest(dispatcher) {
+        val vm = viewModel()
+        vm.submit("this is not a pairing code")
+
+        assertEquals(PairingUiState.Error(R.string.pairing_error_invalid_code), vm.state.value)
+        assertNothingStored()
+        assertTrue("no network call for an unparseable code", server.calls.isEmpty())
+    }
+
+    @Test
+    fun rejected_url_shows_reason() = runTest(dispatcher) {
+        val vm = viewModel()
+        vm.submit(pairingCode("http://manga.example.com", TOKEN))
+
+        val state = vm.state.value as PairingUiState.Error
+        assertEquals(R.string.pairing_error_rejected_url, state.message)
+        assertTrue("the UrlPolicy reason is shown: ${state.detail}", state.detail!!.contains("Plain HTTP"))
+        assertNothingStored()
+        assertTrue(server.calls.isEmpty())
+    }
+
+    @Test
+    fun server_401_during_validation_shows_error_and_clears_token() = runTest(dispatcher) {
+        server.validToken = "some-other-token"
+        val vm = viewModel()
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+
+        assertEquals(PairingUiState.Error(R.string.pairing_error_rejected_code), vm.state.value)
+        assertNothingStored()
+        assertEquals(2, server.calls.size)
+    }
+
+    @Test
+    fun auth_disabled_server_refused_by_default() = runTest(dispatcher) {
+        server.authDisabled = true
+        val vm = viewModel()
+        vm.submit(pairingCode("http://192.168.1.5:5000", TOKEN))
+
+        assertEquals(PairingUiState.ConfirmAuthDisabled("192.168.1.5"), vm.state.value)
+        assertNothingStored()
+        assertEquals("only the probe ran", listOf<String?>(null), server.calls.map { it.second })
+
+        vm.dismissAuthDisabled()
+        assertEquals(PairingUiState.Error(R.string.pairing_error_auth_disabled), vm.state.value)
+        vm.confirmAuthDisabled() // too late: the candidate was dropped
+        assertEquals(PairingUiState.Error(R.string.pairing_error_auth_disabled), vm.state.value)
+        assertNothingStored()
+        assertEquals(1, server.calls.size)
+    }
+
+    @Test
+    fun auth_disabled_override_only_offered_on_private_host() = runTest(dispatcher) {
+        server.authDisabled = true
+        val vm = viewModel()
+
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+        assertEquals("public host: refused, no override",
+            PairingUiState.Error(R.string.pairing_error_auth_disabled), vm.state.value)
+
+        vm.submit(pairingCode("http://192.168.1.5:5000", TOKEN))
+        assertEquals(PairingUiState.ConfirmAuthDisabled("192.168.1.5"), vm.state.value)
+        vm.confirmAuthDisabled()
+
+        assertEquals(PairingUiState.Success, vm.state.value)
+        assertEquals(TOKEN, tokens.token)
+        assertEquals("http://192.168.1.5:5000/", settings.serverUrl())
+        assertEquals(1, repo.baselines)
+        assertEquals("the candidate token is still validated after the override",
+            TOKEN, server.calls.last().second)
+    }
+
+    @Test
+    fun public_host_auth_disabled_cannot_be_overridden() = runTest(dispatcher) {
+        server.authDisabled = true
+        val vm = viewModel()
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+        assertEquals(PairingUiState.Error(R.string.pairing_error_auth_disabled), vm.state.value)
+
+        vm.confirmAuthDisabled()
+
+        assertEquals(PairingUiState.Error(R.string.pairing_error_auth_disabled), vm.state.value)
+        assertNothingStored()
+        assertEquals("no validation call", 1, server.calls.size)
+    }
+
+    @Test
+    fun baseline_failure_rolls_back_token_and_url() = runTest(dispatcher) {
+        baselineFailure = IOException("offline")
+        val vm = viewModel()
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+
+        assertEquals(PairingUiState.Error(R.string.pairing_error_store), vm.state.value)
+        assertEquals(1, repo.baselines)
+        assertEquals("token and URL were stored before the baseline", TOKEN to "https://manga.example.com/", storedAtBaseline)
+        assertNull("token rolled back", tokens.token)
+        assertNull("URL rolled back", settings.serverUrl())
+    }
+
+    @Test
+    fun connection_error_stores_nothing() = runTest(dispatcher) {
+        val vm = viewModel()
+        server.probeFailure = IOException("unreachable")
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+        assertEquals(PairingUiState.Error(R.string.pairing_error_connection), vm.state.value)
+        assertNothingStored()
+
+        server.probeFailure = null
+        server.validationFailure = IOException("timeout")
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+        assertEquals(PairingUiState.Error(R.string.pairing_error_connection), vm.state.value)
+        assertNothingStored()
+
+        server.validationFailure = httpError(500)
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+        assertEquals(PairingUiState.Error(R.string.pairing_error_server, "500"), vm.state.value)
+        assertNothingStored()
+
+        server.validationFailure = null
+        server.probeFailure = httpError(502)
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+        assertEquals(PairingUiState.Error(R.string.pairing_error_connection), vm.state.value)
+        assertNothingStored()
+    }
+
+    @Test
+    fun pasted_code_never_appears_in_ui_state_or_error_messages() = runTest(dispatcher) {
+        val vm = viewModel()
+        val states = recorded(vm)
+        val codes = mutableListOf<String>()
+        fun submit(code: String) {
+            codes += code
+            vm.submit(code)
+            states += vm.state.value
+        }
+
+        submit("mm1.$TOKEN") // malformed, contains the token verbatim
+        submit(pairingCode("http://manga.example.com", TOKEN)) // rejected URL
+        server.validToken = "other"
+        submit(pairingCode("https://manga.example.com", TOKEN)) // 401
+        server.validToken = TOKEN
+        server.validationFailure = IOException("boom $TOKEN")
+        submit(pairingCode("https://manga.example.com", TOKEN)) // connection error whose message has the token
+        server.validationFailure = null
+        server.authDisabled = true
+        submit(pairingCode("http://192.168.1.5:5000", TOKEN)) // confirmation dialog
+        vm.dismissAuthDisabled()
+        server.authDisabled = false
+        baselineFailure = IllegalStateException(TOKEN)
+        submit(pairingCode("https://manga.example.com", TOKEN)) // rollback
+        baselineFailure = null
+        submit(pairingCode("https://manga.example.com", TOKEN)) // success
+
+        assertEquals(PairingUiState.Success, vm.state.value)
+        for (state in states) {
+            val text = state.toString() + ((state as? PairingUiState.Error)?.detail ?: "")
+            assertFalse("token leaked into $state", text.contains(TOKEN))
+            for (code in codes) assertFalse("pasted code leaked into $state", text.contains(code))
+        }
+    }
+
+    /** The production [LatestCall] really sends no Authorization header on the probe and the Bearer token after. */
+    @Test
+    fun factory_latest_call_probes_without_authorization() = runBlocking {
+        val web = MockWebServer().apply { start(InetAddress.getByName("127.0.0.1"), 0) }
+        try {
+            web.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"login required"}"""))
+            web.enqueue(MockResponse().setBody("""{"cursor":9}"""))
+            val base = web.url("/")
+            val probe = runCatching { FactoryLatestCall.latest(base, null) }.exceptionOrNull() as HttpException
+            assertEquals(401, probe.code())
+            assertEquals(9L, FactoryLatestCall.latest(base, TOKEN).cursor)
+
+            val first = web.takeRequest()
+            assertEquals("/api/v1/changes/latest", first.path)
+            assertNull(first.getHeader("Authorization"))
+            assertEquals("Bearer $TOKEN", web.takeRequest().getHeader("Authorization"))
+        } finally {
+            web.shutdown()
+        }
+    }
+
+    private companion object {
+        const val TOKEN = "tok_Secret-Value_0123456789abcdef"
+    }
+}

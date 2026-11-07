@@ -17,6 +17,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import okhttp3.HttpUrl
+import okhttp3.OkHttpClient
 import retrofit2.HttpException
 import retrofit2.Response
 
@@ -222,19 +223,30 @@ class DefaultUpdatesRepository internal constructor(
  * Production [MangaApi] supplier for the stored pairing: re-checks the stored URL with [UrlPolicy], reads the
  * token lazily from [tokenStore] on every request, routes every 401 to [authState], and reuses the client
  * while the URL is unchanged. Returns null when not paired or the stored URL is no longer acceptable.
+ * Keep ONE instance per process: [client] exposes the same OkHttpClient (for Coil), so images and API calls
+ * share one connection pool and the same transport rules.
  */
 class StoredPairingApi(
     private val storedUrl: () -> String?,
     private val tokenStore: TokenStore,
     private val authState: AuthState,
 ) : () -> MangaApi? {
-    private var cached: Pair<HttpUrl, MangaApi>? = null
+    private class Built(val url: HttpUrl, val client: OkHttpClient, val api: MangaApi)
+
+    private var cached: Built? = null
+
+    override fun invoke(): MangaApi? = current()?.api
+
+    /** The OkHttpClient behind [invoke] (same token, interceptors and 401 routing), or null when not paired. */
+    fun client(): OkHttpClient? = current()?.client
 
     @Synchronized
-    override fun invoke(): MangaApi? {
+    private fun current(): Built? {
         if (tokenStore.load() == null) return null
         val url = (UrlPolicy.check(storedUrl() ?: return null) as? UrlCheck.Ok)?.normalized ?: return null
-        cached?.let { (u, api) -> if (u == url) return api }
-        return MangaApiFactory.create(url, tokenStore::load, authState::markUnauthorized).also { cached = url to it }
+        cached?.let { if (it.url == url) return it }
+        val client = MangaApiFactory.client(url, tokenStore::load, authState::markUnauthorized)
+        val api = MangaApiFactory.retrofit(url, client).create(MangaApi::class.java)
+        return Built(url, client, api).also { cached = it }
     }
 }

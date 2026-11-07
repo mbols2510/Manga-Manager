@@ -26,6 +26,7 @@
          UrlPolicy at pairing, and the OkHttp AuthInterceptor / RedirectGuardInterceptor on every request
          and every redirect hop, which block plain HTTP to any non-private host before a socket is opened. -->
     <application
+        android:name=".MangaApp"
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"

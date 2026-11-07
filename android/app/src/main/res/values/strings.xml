@@ -1,4 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Manga Manager</string>
+
+    <!-- Navigation -->
+    <string name="nav_updates">Updates</string>
+    <string name="nav_doubles">Doubles</string>
+    <string name="nav_jobs">Jobs</string>
+    <string name="nav_settings">Settings</string>
+    <string name="coming_soon">Coming soon</string>
+
+    <!-- Pairing -->
+    <string name="pairing_title">Pair with your server</string>
+    <string name="pairing_explanation">On the Manga Manager web dashboard, open Settings &gt; Devices, add this device and copy its pairing code. Paste the whole code below. Treat it like a password: it contains this device\'s access token.</string>
+    <string name="pairing_code_label">Pairing code</string>
+    <string name="pairing_submit">Pair</string>
+    <string name="pairing_validating">Checking the code with your server…</string>
+    <string name="pairing_error_invalid_code">That doesn\'t look like a pairing code. Copy the whole code, which starts with mm1., and paste it again.</string>
+    <string name="pairing_error_rejected_url">This server address can\'t be used: %1$s</string>
+    <string name="pairing_error_auth_disabled">This server has authentication turned off, so anyone who can reach it can use it. Turn on dashboard login on the server, then create a new pairing code.</string>
+    <string name="pairing_error_connection">Could not reach the server. Check that you are on the right network or VPN, then try again.</string>
+    <string name="pairing_error_rejected_code">The server rejected this code. It may have been revoked; create a new one under Settings &gt; Devices.</string>
+    <string name="pairing_error_server">The server answered with an unexpected status (HTTP %1$s). Try again later.</string>
+    <string name="pairing_error_store">Pairing could not be completed and nothing was saved. Try again.</string>
+    <string name="pairing_auth_disabled_title">Authentication is turned off</string>
+    <string name="pairing_auth_disabled_message">The server at %1$s has authentication turned off: anyone on your network can use it without a token. Pair only if you trust every device on this private network.</string>
+    <string name="pairing_auth_disabled_confirm">I understand, pair anyway</string>
+    <string name="pairing_auth_disabled_cancel">Cancel</string>
 </resources>
