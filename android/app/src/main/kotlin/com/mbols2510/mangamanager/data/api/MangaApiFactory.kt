@@ -53,6 +53,10 @@ object MangaApiFactory {
     fun client(baseUrl: HttpUrl, token: () -> String?, onUnauthorized: () -> Unit = {}): OkHttpClient =
         buildClient(baseUrl, token, onUnauthorized)
 
+    /** TDD stub: the gated shared client arrives in the next commit. */
+    fun sharedClient(baseUrl: () -> HttpUrl?, token: () -> String?, onUnauthorized: () -> Unit = {}): OkHttpClient =
+        OkHttpClient()
+
     internal fun retrofit(baseUrl: HttpUrl, client: OkHttpClient): Retrofit = Retrofit.Builder()
         .baseUrl(baseUrl)
         .client(client)

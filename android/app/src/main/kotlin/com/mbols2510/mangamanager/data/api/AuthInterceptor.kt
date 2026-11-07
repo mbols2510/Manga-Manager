@@ -20,6 +20,9 @@ import okio.buffer
 /** A request URL failed [UrlPolicy]. Thrown before any network access. Its message never contains a token. */
 class UrlPolicyViolation(message: String) : IOException(message)
 
+/** The request was refused because the device is not paired or the destination is not the paired server. */
+class NotPairedException(message: String) : IOException(message)
+
 private const val AUTHORIZATION = "Authorization"
 
 /**
