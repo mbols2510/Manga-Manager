@@ -3,6 +3,7 @@ package com.mbols2510.mangamanager.notify
 import android.Manifest
 import android.app.Application
 import android.app.Notification
+import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import androidx.test.core.app.ApplicationProvider
@@ -71,6 +72,7 @@ class LocalNotifierTest {
         assertTrue(n.flags and Notification.FLAG_ONLY_ALERT_ONCE != 0)
         assertNull("no cover image", n.getLargeIcon())
         assertEquals(R.drawable.ic_notification, n.smallIcon.resId)
+        assertNull("no group key without a group summary: each check's notification is its own summary", n.group)
     }
 
     @Test
@@ -98,6 +100,44 @@ class LocalNotifierTest {
         assertNull(n.getLargeIcon())
         assertNull(public.getLargeIcon())
         assertFalse(n.extras.containsKey(Notification.EXTRA_PICTURE))
+    }
+
+    @Test
+    fun mixed_batch_posts_on_the_updates_channel() {
+        assertTrue(LocalNotifier(app).notifyUpdates(listOf(update(1, title = "Alpha"), update(2, title = "Secret Title", sensitive = true))))
+        val n = posted().single()
+        assertEquals("updates", n.channelId)
+        assertEquals(Notification.VISIBILITY_PRIVATE, n.visibility)
+        assertNotNull(n.publicVersion)
+        for (text in n.texts() + n.publicVersion!!.texts()) assertFalse(text, text.contains("Secret"))
+    }
+
+    @Test
+    fun all_sensitive_batch_posts_on_the_sensitive_channel() {
+        assertTrue(LocalNotifier(app).notifyUpdates(listOf(update(1, sensitive = true), update(2, sensitive = true))))
+        val n = posted().single()
+        assertEquals("updates_sensitive", n.channelId)
+        assertEquals(Notification.VISIBILITY_PRIVATE, n.visibility)
+        assertNotNull(n.publicVersion)
+    }
+
+    @Test
+    fun hidden_sensitive_channel_does_not_swallow_non_sensitive_alerts_in_a_mixed_batch() {
+        // The user turned the sensitive channel off (importance NONE); re-creating a channel never raises importance.
+        manager.createNotificationChannel(
+            NotificationChannel(LocalNotifier.CHANNEL_UPDATES_SENSITIVE, "Sensitive", NotificationManager.IMPORTANCE_NONE),
+        )
+        val notifier = LocalNotifier(app)
+        notifier.ensureChannels()
+        assertEquals("blocked state simulated", NotificationManager.IMPORTANCE_NONE,
+            manager.getNotificationChannel(LocalNotifier.CHANNEL_UPDATES_SENSITIVE).importance)
+
+        assertTrue(notifier.notifyUpdates(listOf(update(1, title = "Alpha"), update(2, sensitive = true))))
+        assertEquals("updates", posted().single().channelId)
+
+        assertFalse("an all-sensitive batch on the hidden channel is not posted",
+            notifier.notifyUpdates(listOf(update(3, sensitive = true))))
+        assertEquals(1, posted().size)
     }
 
     @Test

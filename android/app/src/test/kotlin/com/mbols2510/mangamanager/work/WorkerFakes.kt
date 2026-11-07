@@ -42,8 +42,12 @@ class FakeNotifier(var available: Boolean = true) : Notifier {
         return available && items.isNotEmpty()
     }
 
+    /** Simulates an unexpected platform failure while posting the repair notice. */
+    var repairFailure: RuntimeException? = null
+
     override fun notifyRepairNeeded(): Boolean {
         repairCalls++
+        repairFailure?.let { throw it }
         return available
     }
 }

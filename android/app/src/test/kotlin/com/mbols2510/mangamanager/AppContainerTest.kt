@@ -12,7 +12,17 @@ import com.mbols2510.mangamanager.data.FakeSettingsStore
 import com.mbols2510.mangamanager.data.SettingsStore
 import com.mbols2510.mangamanager.data.api.NotPairedException
 import com.mbols2510.mangamanager.data.repo.CheckResult
+import com.mbols2510.mangamanager.ui.pairing.FakeServer
 import com.mbols2510.mangamanager.ui.pairing.FakeTokenStore
+import com.mbols2510.mangamanager.ui.pairing.FakeUpdatesRepository
+import com.mbols2510.mangamanager.ui.pairing.PairingUiState
+import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
+import com.mbols2510.mangamanager.ui.pairing.pairingCode
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.setMain
 import com.mbols2510.mangamanager.work.Scheduler
 import java.io.IOException
 import java.net.InetAddress
@@ -124,6 +134,48 @@ class AppContainerTest {
             revoked.scheduleChecksIfPaired()
         }
         assertTrue("no checks while waiting for a re-pair", activeChecks().isEmpty())
+    }
+
+    @Test
+    fun app_start_does_not_schedule_while_needs_repair_is_set() {
+        val settings = FakeSettingsStore("https://manga.example.com/", needsRepair = true)
+        val container = AppContainer(context, settings, FakeTokenStore().apply { token = "tok_start_0123456789" })
+        runBlocking {
+            container.warmUp()
+            container.authState.clear() // even if the in-memory state were lost, the persisted flag decides
+            container.scheduleChecksIfPaired()
+        }
+        assertTrue(activeChecks().isEmpty())
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun pairing_success_clears_flag_and_schedules() {
+        val dispatcher = UnconfinedTestDispatcher()
+        Dispatchers.setMain(dispatcher)
+        try {
+            val settings = FakeSettingsStore(needsRepair = true)
+            val container = AppContainer(context, settings, FakeTokenStore())
+            runBlocking { container.warmUp() }
+            assertTrue(container.authState.needsRepair.value)
+            runBlocking { container.scheduleChecksIfPaired() }
+            assertTrue(activeChecks().isEmpty())
+
+            val token = "tok_pairing_0123456789abcdef"
+            val vm = PairingViewModel(
+                container.tokenStore, container.settingsStore, container.authState, FakeUpdatesRepository(),
+                container.credentials, FakeServer(validToken = token), dispatcher,
+                afterPaired = container::scheduleAfterPairing,
+            )
+            vm.submit(pairingCode("https://manga.example.com", token))
+
+            assertEquals(PairingUiState.Success, vm.state.value)
+            assertFalse(runBlocking { settings.needsRepair() })
+            assertFalse(container.authState.needsRepair.value)
+            assertEquals(1, activeChecks().size)
+        } finally {
+            Dispatchers.resetMain()
+        }
     }
 
     @After

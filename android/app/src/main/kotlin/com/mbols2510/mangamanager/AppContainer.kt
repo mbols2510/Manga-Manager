@@ -94,6 +94,11 @@ class AppContainer internal constructor(
         if (credentials.get() != null && !authState.needsRepair.value) scheduler.apply(settingsStore.checkSettings())
     }
 
+    /** After a successful (re-)pairing, which has cleared the repair flag: schedule the periodic check. Call on IO. */
+    suspend fun scheduleAfterPairing() {
+        scheduler.apply(settingsStore.checkSettings())
+    }
+
     /** Unpairs: the request path stops first, then the persisted token and URL are removed. Call on IO. */
     suspend fun unpair() {
         credentials.clear()
@@ -143,7 +148,7 @@ class AppContainer internal constructor(
         initializer {
             PairingViewModel(
                 tokenStore, settingsStore, authState, updatesRepository, credentials,
-                afterPaired = { scheduler.apply(settingsStore.checkSettings()) },
+                afterPaired = ::scheduleAfterPairing,
             )
         }
     }

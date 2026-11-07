@@ -148,9 +148,19 @@ class CheckWorkerTest {
         assertEquals(ListenableWorker.Result.retry(), run(repo))
         assertTrue("silent", notifier.updateCalls.isEmpty() && notifier.repairCalls == 0)
         assertNull(runBlocking { settings.lastSuccessfulCheckAt() })
-        // Not forever: from the fifth attempt the run ends and the next period tries again.
-        assertEquals(ListenableWorker.Result.retry(), run(repo, attempt = CheckWorker.MAX_RETRY_ATTEMPTS - 1))
-        assertEquals(ListenableWorker.Result.success(), run(repo, attempt = CheckWorker.MAX_RETRY_ATTEMPTS))
+        // Ruling 22: one retry per period; from attempt count 1 the run ends and the next period tries again.
+        assertEquals(ListenableWorker.Result.success(), run(repo, attempt = 1))
+        assertEquals(ListenableWorker.Result.success(), run(repo, attempt = 5))
+    }
+
+    @Test
+    fun offline_twice_in_a_period_gives_up_until_the_next_period() {
+        val repo = FakeUpdatesRepository(CheckResult.Offline)
+        assertEquals("first failure: one retry with backoff", ListenableWorker.Result.retry(), run(repo, attempt = 0))
+        assertEquals("second failure: wait for the next period", ListenableWorker.Result.success(), run(repo, attempt = 1))
+        assertEquals(2, repo.checks)
+        assertTrue(notifier.updateCalls.isEmpty() && notifier.repairCalls == 0)
+        assertNull("giving up is not a successful check", runBlocking { settings.lastSuccessfulCheckAt() })
     }
 
     @Test
@@ -313,11 +323,42 @@ class CheckWorkerTest {
     }
 
     @Test
-    fun a_failing_notifier_never_crashes_the_run_or_loops_on_the_same_items() {
+    fun notifier_exception_leaves_items_pending_and_returns_success() {
         notifier.failure = IllegalStateException("platform failure")
-        val repo = FakeUpdatesRepository(CheckResult.NewItems(listOf(update(1))))
-        assertEquals(ListenableWorker.Result.success(), run(repo))
-        assertEquals(listOf(1L), repo.marked)
+        val repo = realRepository(PagedApi(total = 3))
+        assertEquals("no retry, no tight loop", ListenableWorker.Result.success(), run(repo))
+        assertEquals(1, notifier.updateCalls.size)
+        val rows = stored()
+        assertEquals(listOf(1L, 2L, 3L), rows.map { it.id })
+        assertTrue("an exception is not a decision: still pending", rows.none { it.notified })
+        assertEquals(listOf(1L, 2L, 3L), runBlocking { repo.pendingNotifications() }.map { it.id })
+    }
+
+    @Test
+    fun pending_items_after_a_notifier_exception_are_notified_next_period() {
+        notifier.failure = IllegalStateException("platform failure")
+        val repo = realRepository(PagedApi(total = 3))
+        run(repo)
+        notifier.failure = null
+        notifier.updateCalls.clear()
+
+        assertEquals(ListenableWorker.Result.success(), run(repo)) // next period: the server has nothing newer
+        assertEquals(1, notifier.updateCalls.size)
+        assertEquals(listOf(1L, 2L, 3L), notifier.updateCalls.single().map { it.id })
+        assertTrue(stored().all { it.notified })
+        run(repo)
+        assertEquals("never twice", 1, notifier.updateCalls.size)
+    }
+
+    @Test
+    fun repair_notice_failure_does_not_crash_and_work_is_still_cancelled() {
+        scheduler.apply(CheckSettings.DEFAULT)
+        notifier.repairFailure = IllegalStateException("platform failure")
+        assertEquals(ListenableWorker.Result.success(), run(FakeUpdatesRepository(CheckResult.Unauthorized)))
+        assertEquals(1, notifier.repairCalls)
+        assertTrue("flag persisted first", runBlocking { settings.needsRepair() })
+        assertTrue(auth.needsRepair.value)
+        assertTrue("periodic work cancelled", activeWork().isEmpty())
     }
 
     @Test
@@ -344,7 +385,7 @@ class CheckWorkerTest {
         assertEquals(ListenableWorker.Result.success(), run(repo))
         assertEquals(0, repo.checks)
         assertEquals(1, warmUps)
-        assertEquals("cancels nothing", 1, activeWork().size)
+        assertTrue("an unpaired install must not wake the device every period", activeWork().isEmpty())
     }
 
     @Test
