@@ -41,13 +41,20 @@ class UrlPolicyTest {
             "http://[fc00::1]" to "http://[fc00::1]/",
             "http://[fe80::1]" to "http://[fe80::1]/",
             "http://[::1]" to "http://[::1]/",
-            "http://[::ffff:192.168.1.1]" to "http://[::ffff:c0a8:101]/",
             "http://localhost" to "http://localhost/",
             "http://LOCALHOST:8000/x" to "http://localhost:8000/x/",
             "http://nas.local" to "http://nas.local/",
             "http://NAS.Local:8080/m" to "http://nas.local:8080/m/",
         )
         for ((raw, expected) in table) assertEquals(raw, expected, ok(raw))
+    }
+
+    @Test
+    fun ipv4_mapped_ipv6_uses_the_underlying_ipv4() {
+        ok("http://[::ffff:192.168.1.1]")
+        ok("http://[::ffff:10.0.0.1]:8080/m")
+        rejected("http://[::ffff:8.8.8.8]")
+        rejected("http://[::ffff:808:808]")
     }
 
     @Test
