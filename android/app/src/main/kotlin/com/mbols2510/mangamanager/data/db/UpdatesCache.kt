@@ -62,7 +62,10 @@ class RoomUpdatesCache internal constructor(
         }
     }
 
-    override suspend fun storeBrowsed(items: List<UpdateEntity>) = Unit
+    override suspend fun storeBrowsed(items: List<UpdateEntity>) {
+        if (items.isEmpty()) return
+        dao.upsertAll(items.map { it.copy(notified = true) })
+    }
 
     override suspend fun pendingNotifications(): List<UpdateEntity> = dao.pendingNotifications()
 

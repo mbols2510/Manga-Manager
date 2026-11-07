@@ -83,7 +83,7 @@ interface UpdatesRepository {
 
 /**
  * [api] returns the client for the stored pairing, or null when the device is not paired (treated as 401).
- * The foreground feed refresh (Task 10) reuses [checkForChanges]; there is no separate refresh call.
+ * The foreground feed refresh ([refreshFeed]) runs the same check, then stores the newest browse page.
  */
 class DefaultUpdatesRepository internal constructor(
     private val api: () -> MangaApi?,
@@ -107,7 +107,42 @@ class DefaultUpdatesRepository internal constructor(
 
     override suspend fun checkForChanges(): CheckResult = checkLock.withLock { checkOnce() }
 
-    override suspend fun refreshFeed(): FeedRefreshResult = FeedRefreshResult.Offline
+    override suspend fun refreshFeed(): FeedRefreshResult = checkLock.withLock {
+        when (checkOnce()) {
+            CheckResult.Unauthorized -> FeedRefreshResult.Unauthorized
+            // The server could not be reached: one failed request is enough, the browse page would fail too.
+            CheckResult.Offline -> FeedRefreshResult.Offline
+            is CheckResult.NewItems, CheckResult.NoChange -> browseOnce()
+        }
+    }
+
+    /**
+     * Stores the newest browse page. Its rows are what the user is about to see, so they are stored as notified;
+     * the sync cursor and ETag stay with [checkForChanges]. A row newer than the cursor is later re-delivered by the
+     * change feed as an already-known id, which keeps its notified flag and is not reported as new.
+     */
+    private suspend fun browseOnce(): FeedRefreshResult = try {
+        val client = api()
+        if (client == null) {
+            authState.markUnauthorized()
+            FeedRefreshResult.Unauthorized
+        } else {
+            val page = client.updates(limit = BROWSE_LIMIT)
+            cache.storeBrowsed(page.items.map { it.toEntity() })
+            FeedRefreshResult.Ok
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: HttpException) {
+        if (e.isOwn401()) {
+            authState.markUnauthorized()
+            FeedRefreshResult.Unauthorized
+        } else {
+            FeedRefreshResult.Offline
+        }
+    } catch (_: Exception) {
+        FeedRefreshResult.Offline
+    }
 
     private suspend fun checkOnce(): CheckResult {
         return try {

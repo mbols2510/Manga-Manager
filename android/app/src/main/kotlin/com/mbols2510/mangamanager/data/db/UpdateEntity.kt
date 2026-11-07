@@ -34,5 +34,6 @@ fun UpdateDto.toEntity(): UpdateEntity = UpdateEntity(
     createdAt = createdAt.orEmpty(),
     thumbnail = thumbnail,
     kavitaUrl = kavitaUrl,
-    sensitive = sensitive ?: false,
+    // Fail closed: a server that did not send the flag never gets a mature cover shown unblurred (spec 7.5).
+    sensitive = sensitive ?: true,
 )
