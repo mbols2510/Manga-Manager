@@ -3,6 +3,7 @@ package com.mbols2510.mangamanager.data.repo
 import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import com.mbols2510.mangamanager.core.TokenStore
 import com.mbols2510.mangamanager.data.api.MangaApi
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
 import com.mbols2510.mangamanager.data.db.AppDatabase
@@ -23,6 +24,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -386,5 +388,36 @@ class UpdatesRepositoryTest {
             SyncState(3, null, 1L),
         )
         assertEquals(listOf(3L, 2L, 1L), repo(cache = cache).feed.first().map { it.id })
+    }
+
+    @Test
+    fun stored_pairing_api_checks_url_reads_token_lazily_and_routes_401() = runBlocking {
+        val tokens = object : TokenStore {
+            var value: String? = null
+            override fun save(token: String) { value = token }
+            override fun load(): String? = value
+            override fun clear() { value = null }
+        }
+        var url: String? = base.toString()
+        val provider = StoredPairingApi({ url }, tokens, auth)
+        assertNull("no token stored: not paired", provider())
+
+        tokens.save("first")
+        val api = provider()!!
+        assertSame("same URL reuses the client", api, provider())
+        server.enqueue(latest(1))
+        api.latest()
+        assertEquals("Bearer first", take().getHeader("Authorization"))
+
+        tokens.save("second")
+        server.enqueue(MockResponse().setResponseCode(401))
+        runCatching { api.latest() }
+        assertEquals("token is read on every request", "Bearer second", take().getHeader("Authorization"))
+        assertTrue("any 401 through the provider sets needsRepair", auth.needsRepair.value)
+
+        url = "http://example.com/"
+        assertNull("a stored URL that fails UrlPolicy gives no client", provider())
+        url = null
+        assertNull(provider())
     }
 }
