@@ -16,13 +16,17 @@ import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
 import com.mbols2510.mangamanager.data.db.AppDatabase
 import com.mbols2510.mangamanager.data.db.RoomUpdatesCache
 import com.mbols2510.mangamanager.data.repo.AuthState
+import com.mbols2510.mangamanager.data.repo.DefaultServerToolsRepository
 import com.mbols2510.mangamanager.data.repo.DefaultUpdatesRepository
 import com.mbols2510.mangamanager.data.repo.PairedBaseUrl
+import com.mbols2510.mangamanager.data.repo.ServerToolsRepository
 import com.mbols2510.mangamanager.data.repo.StoredPairingApi
 import com.mbols2510.mangamanager.data.repo.UpdatesRepository
 import com.mbols2510.mangamanager.notify.LocalNotifier
 import com.mbols2510.mangamanager.notify.Notifier
 import com.mbols2510.mangamanager.ui.AppViewModel
+import com.mbols2510.mangamanager.ui.doubles.DoublesViewModel
+import com.mbols2510.mangamanager.ui.jobs.JobsViewModel
 import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
 import com.mbols2510.mangamanager.ui.updates.UpdatesViewModel
 import com.mbols2510.mangamanager.work.CheckWorker
@@ -155,6 +159,11 @@ class AppContainer internal constructor(
         DefaultUpdatesRepository(pairingApi, RoomUpdatesCache(database), authState)
     }
 
+    /** Doubles and Jobs/Health calls over the same supplier and shared client; a 401 sets [authState]. */
+    val serverTools: ServerToolsRepository by lazy {
+        DefaultServerToolsRepository(pairingApi, authState, ensureReady = ::warmUpIfCold)
+    }
+
     val factory: ViewModelProvider.Factory = viewModelFactory {
         initializer { AppViewModel(tokenStore, settingsStore, authState) }
         initializer {
@@ -164,5 +173,7 @@ class AppContainer internal constructor(
             )
         }
         initializer { UpdatesViewModel(updatesRepository, credentials::get, ensureReady = ::warmUpIfCold) }
+        initializer { DoublesViewModel(serverTools) }
+        initializer { JobsViewModel(serverTools) }
     }
 }

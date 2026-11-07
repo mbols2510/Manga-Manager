@@ -8,7 +8,6 @@ import com.mbols2510.mangamanager.data.api.MangaApi
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
 import com.mbols2510.mangamanager.data.api.PairedCredentials
 import com.mbols2510.mangamanager.data.api.UpdateDto
-import com.mbols2510.mangamanager.data.api.sameOrigin
 import com.mbols2510.mangamanager.data.db.SyncState
 import com.mbols2510.mangamanager.data.db.UpdateEntity
 import com.mbols2510.mangamanager.data.db.UpdatesCache
@@ -260,19 +259,6 @@ class DefaultUpdatesRepository internal constructor(
         )
         return if (fresh.isEmpty()) CheckResult.NoChange else CheckResult.NewItems(fresh.sortedBy { it.id })
     }
-
-    /**
-     * A 401 counts only when it came from the origin the call was sent to. After a redirect to another host the
-     * 401 is that host's and says nothing about our token (the token is never sent there).
-     */
-    private fun okhttp3.Response.isOwn401(): Boolean {
-        if (code != 401) return false
-        var first: okhttp3.Response = this
-        while (true) first = first.priorResponse ?: break
-        return sameOrigin(request.url, first.request.url)
-    }
-
-    private fun HttpException.isOwn401(): Boolean = response()?.raw()?.isOwn401() == true
 
     private fun unauthorized(): CheckResult {
         authState.markUnauthorized()

@@ -1,0 +1,45 @@
+{
+  "id": 12,
+  "name": "Berserk",
+  "libraryId": 1,
+  "chapters": [
+    {
+      "id": 501,
+      "number": "12",
+      "range": "12",
+      "title": "",
+      "isSpecial": false,
+      "sortOrder": 12.0,
+      "volumeId": 88,
+      "volumeName": "3",
+      "isLooseVolume": false,
+      "files": [
+        {"id": 9001, "filePath": "/manga/Berserk/Berserk Ch.12 (Official).cbz", "bytes": 52428800, "pages": 24,
+         "format": 1, "localPath": "/data/manga/Berserk/Berserk Ch.12 (Official).cbz",
+         "modifiedAt": "2026-10-01T08:30:00+00:00", "isOfficial": true, "isNewest": false, "isLargest": true},
+        {"id": 9002, "filePath": "/manga/Berserk/Berserk Ch.12.cbz", "bytes": 31457280, "pages": 22,
+         "format": 1, "localPath": "/data/manga/Berserk/Berserk Ch.12.cbz",
+         "modifiedAt": "2026-11-02T19:05:11.123456+00:00", "isOfficial": false, "isNewest": true, "isLargest": false}
+      ]
+    },
+    {
+      "id": 502,
+      "number": 13,
+      "range": "13",
+      "title": "The Eclipse",
+      "isSpecial": false,
+      "sortOrder": 13,
+      "volumeId": 89,
+      "volumeName": "-100000",
+      "isLooseVolume": true,
+      "files": [
+        {"id": 9003, "filePath": "/manga/Berserk/Ch.13 a.cbz", "bytes": 1000, "pages": 20, "format": 1,
+         "localPath": "/data/manga/Berserk/Ch.13 a.cbz", "modifiedAt": null,
+         "isOfficial": false, "isNewest": false, "isLargest": true},
+        {"id": 9004, "filePath": "/manga/Berserk/Ch.13 b.cbz", "bytes": 1000, "pages": 20, "format": 1,
+         "localPath": "/data/manga/Berserk/Ch.13 b.cbz", "modifiedAt": null,
+         "isOfficial": false, "isNewest": false, "isLargest": false}
+      ]
+    }
+  ]
+}

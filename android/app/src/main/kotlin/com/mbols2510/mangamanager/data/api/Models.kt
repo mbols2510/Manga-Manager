@@ -109,12 +109,16 @@ data class HealthDto(
     val paused: String? = null,
 )
 
-/** One entry of `Guard.checks()`. `detail` is whatever the check returned, so it is kept as raw JSON. */
+/**
+ * One entry of `Guard.checks()` (guard.py `_run_one`): `state` is `ok`, `unset` or `fail`. Every check function
+ * returns a string ("connected", "reachable", "online (host:port)") and the skip/fail paths use `str(exc)`, so
+ * `detail` is text; a non-text value would become "".
+ */
 @Serializable
 data class HealthCheckDto(
     val name: String = "",
     val state: String = "",
-    val detail: JsonElement? = null,
+    @Serializable(with = PrimitiveAsStringSerializer::class) val detail: String = "",
     val ms: Long = 0,
 )
 
@@ -164,7 +168,12 @@ data class DoubleChapterDto(
     val files: List<DoubleFileDto> = emptyList(),
 )
 
-/** A file of a duplicated chapter. `format` is Kavita's raw value (shape not confirmed), kept as JSON. */
+/**
+ * A file of a duplicated chapter: `flatten_chapters` copies Kavita's id/filePath/bytes/pages/format and `enrich_chapter`
+ * adds localPath/modifiedAt (null when the file is missing on disk)/isOfficial/isNewest/isLargest. Entries imported
+ * from the legacy state.json may lack the enrichment, hence the defaults. `format` is Kavita's MangaFormat value
+ * (unused by the app), kept as raw JSON.
+ */
 @Serializable
 data class DoubleFileDto(
     val id: Long,

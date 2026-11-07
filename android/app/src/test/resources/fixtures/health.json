@@ -1,0 +1,17 @@
+{
+  "version": "2.4.0",
+  "checks": [
+    {"name": "Database", "state": "ok", "detail": "connected", "ms": 3},
+    {"name": "NAS", "state": "ok", "detail": "online (192.168.1.10:445)", "ms": 12},
+    {"name": "Kavita", "state": "fail", "detail": "HTTPConnectionPool(host='kavita', port=5000): Read timed out.", "ms": 5003},
+    {"name": "Suwayomi", "state": "ok", "detail": "reachable", "ms": 40},
+    {"name": "ntfy", "state": "unset", "detail": "ntfy URL not set", "ms": 0}
+  ],
+  "jobs": {
+    "dc-scan": {"name": "dc-scan", "running": false, "last_started": "2026-11-07T09:45:00+00:00",
+                "last_finished": "2026-11-07T09:45:20+00:00", "last_error": null, "next_run": "2026-11-07T10:00:20+00:00"},
+    "dc-trash": {"name": "dc-trash", "running": false, "last_started": null, "last_finished": null,
+                 "last_error": "Skipped: Offline: Kavita", "next_run": null}
+  },
+  "paused": "Offline: Kavita"
+}

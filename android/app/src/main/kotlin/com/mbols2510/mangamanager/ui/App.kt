@@ -21,6 +21,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.mbols2510.mangamanager.core.CachingTokenStore
 import com.mbols2510.mangamanager.data.CachingSettingsStore
 import com.mbols2510.mangamanager.data.repo.AuthState
+import com.mbols2510.mangamanager.ui.doubles.DoublesScreen
+import com.mbols2510.mangamanager.ui.doubles.DoublesViewModel
+import com.mbols2510.mangamanager.ui.jobs.JobsScreen
+import com.mbols2510.mangamanager.ui.jobs.JobsViewModel
 import com.mbols2510.mangamanager.ui.pairing.PairingScreen
 import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
 import com.mbols2510.mangamanager.ui.updates.UpdatesScreen
@@ -73,6 +77,8 @@ fun App(appViewModel: AppViewModel, viewModelFactory: ViewModelProvider.Factory)
                 },
                 // Scoped to the Updates back-stack entry: a re-pair pops it, so the next open starts a fresh screen.
                 updatesScreen = { UpdatesScreen(viewModel = viewModel<UpdatesViewModel>(factory = viewModelFactory)) },
+                doublesScreen = { DoublesScreen(viewModel = viewModel<DoublesViewModel>(factory = viewModelFactory)) },
+                jobsScreen = { JobsScreen(viewModel = viewModel<JobsViewModel>(factory = viewModelFactory)) },
             )
         }
     }

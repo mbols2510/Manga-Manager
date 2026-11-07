@@ -1,0 +1,9 @@
+[
+  {"id": "6f1c9a52-3d1e-4c8b-9b6e-2a7f0d4e5c11", "originalPath": "/data/manga/Berserk/Berserk Ch.11.cbz",
+   "trashPath": "/app/data/double-chapters/trash/20261105T101500/Berserk Ch.11.cbz", "seriesId": 12,
+   "seriesName": "Berserk", "libraryId": 1, "chapterId": 500, "size": 30000000,
+   "deletedAt": "2026-11-05T10:15:00.512345+00:00", "expiresAt": "2026-12-05T10:15:00.512345+00:00"},
+  {"id": "legacy-1", "originalPath": "/data/manga/Old/a.cbz", "trashPath": "/app/data/double-chapters/trash/a.cbz",
+   "seriesId": 3, "seriesName": null, "libraryId": null, "chapterId": 1, "size": 10,
+   "deletedAt": "2026-01-01T00:00:00+00:00", "expiresAt": null}
+]

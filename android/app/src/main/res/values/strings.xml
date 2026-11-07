@@ -78,4 +78,131 @@
     <string name="updates_open_in_kavita">Open in Kavita</string>
     <string name="updates_chapters_separator">", "</string>
     <string name="updates_meta_separator">" · "</string>
+
+    <!-- Shared (Tasks 11+) -->
+    <string name="action_refresh">Refresh</string>
+    <string name="action_retry">Try again</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_back">Back</string>
+    <string name="action_dismiss">Dismiss</string>
+    <string name="list_separator">" · "</string>
+    <string name="unreachable_title">Can\'t reach the server</string>
+    <string name="unreachable_text">Check that you are on the right network or VPN, then try again.</string>
+    <string name="server_error">The server answered with an error (HTTP %1$d).</string>
+    <string name="server_error_with_text">The server answered with an error (HTTP %1$d): %2$s</string>
+    <string name="value_unknown">unknown</string>
+    <string name="value_never">never</string>
+
+    <!-- Doubles (Task 11). Series names, chapter titles and file names from the server are shown as plain text. -->
+    <string name="doubles_title">Double chapters</string>
+    <string name="doubles_tab_series">Series</string>
+    <string name="doubles_tab_trash">Trash</string>
+    <string name="doubles_empty_title">No duplicate chapters</string>
+    <string name="doubles_empty_text">Your server found no chapters with more than one file. It checks again on its own schedule.</string>
+    <string name="doubles_trash_empty_title">Trash is empty</string>
+    <string name="doubles_trash_empty_text">Files you trash here or on the web dashboard appear in this list until they expire.</string>
+    <string name="doubles_open_series">Show duplicate chapters</string>
+    <string name="doubles_series_unnamed">Series %1$d</string>
+    <plurals name="doubles_chapter_count">
+        <item quantity="one">%d chapter with duplicates</item>
+        <item quantity="other">%d chapters with duplicates</item>
+    </plurals>
+    <plurals name="doubles_file_count">
+        <item quantity="one">%d file</item>
+        <item quantity="other">%d files</item>
+    </plurals>
+    <plurals name="doubles_pages">
+        <item quantity="one">%d page</item>
+        <item quantity="other">%d pages</item>
+    </plurals>
+    <string name="doubles_chapter_label">Chapter %1$s</string>
+    <string name="doubles_volume_label">Volume %1$s</string>
+    <string name="doubles_chip_official">Official</string>
+    <string name="doubles_chip_newest">Newest</string>
+    <string name="doubles_chip_largest">Largest</string>
+    <string name="doubles_date_unknown">date unknown</string>
+    <string name="doubles_keep_selected">Keep selected, trash the rest</string>
+    <string name="doubles_working">Working…</string>
+    <string name="doubles_confirm_remediate_title">Move files to the trash?</string>
+    <string name="doubles_confirm_remediate_keep">Keep: %1$s</string>
+    <plurals name="doubles_confirm_remediate_trash">
+        <item quantity="one">Move %d file to the server\'s trash:</item>
+        <item quantity="other">Move %d files to the server\'s trash:</item>
+    </plurals>
+    <string name="doubles_confirm_remediate_note">You can restore trashed files from the Trash tab until they expire.</string>
+    <string name="doubles_confirm_remediate_action">Move to trash</string>
+    <string name="doubles_confirm_restore_title">Restore this file?</string>
+    <string name="doubles_confirm_restore_text">%1$s goes back to its original folder and Kavita is asked to rescan the series.</string>
+    <string name="doubles_confirm_restore_action">Restore</string>
+    <string name="doubles_restore">Restore</string>
+    <string name="doubles_trash_deleted">Trashed %1$s</string>
+    <string name="doubles_trash_expires">Deleted for good %1$s</string>
+    <string name="doubles_trash_never_expires">Kept until purged on the web dashboard</string>
+    <plurals name="doubles_remediated">
+        <item quantity="one">%d file moved to the trash.</item>
+        <item quantity="other">%d files moved to the trash.</item>
+    </plurals>
+    <string name="doubles_restored">File restored.</string>
+    <string name="doubles_maybe_applied">No answer from the server in time. The change may have been applied; the list was reloaded to show the current state.</string>
+
+    <!-- Jobs and health (Task 11) -->
+    <string name="jobs_title">Jobs and health</string>
+    <string name="jobs_run_now">Run now</string>
+    <string name="jobs_run_started">Run started.</string>
+    <string name="jobs_run_already_running">A run is already in progress.</string>
+    <string name="jobs_run_disabled">Manual runs are turned off on the server.</string>
+    <string name="jobs_run_maybe_started">No answer from the server in time. The run may have started; refresh to check.</string>
+    <string name="jobs_run_unreachable">Could not reach the server. The run was not started.</string>
+    <string name="jobs_section_scheduler">Scheduler</string>
+    <string name="jobs_section_last_run">Last run</string>
+    <string name="jobs_section_library">Library</string>
+    <string name="jobs_section_health">Connections</string>
+    <string name="jobs_section_jobs">Background jobs</string>
+    <string name="jobs_scheduler_off">The scheduler is not running on the server.</string>
+    <string name="jobs_scheduler_running">Running now</string>
+    <string name="jobs_scheduler_idle">Idle</string>
+    <string name="jobs_next_run">Next run: %1$s</string>
+    <plurals name="jobs_interval">
+        <item quantity="one">Every %d minute</item>
+        <item quantity="other">Every %d minutes</item>
+    </plurals>
+    <string name="jobs_last_result">Last result: %1$s</string>
+    <string name="jobs_no_runs">No run yet.</string>
+    <string name="jobs_run_status">Status: %1$s</string>
+    <string name="jobs_run_started_at">Started: %1$s</string>
+    <string name="jobs_run_finished_at">Finished: %1$s</string>
+    <plurals name="jobs_run_moved">
+        <item quantity="one">%d chapter moved</item>
+        <item quantity="other">%d chapters moved</item>
+    </plurals>
+    <plurals name="jobs_run_covers">
+        <item quantity="one">%d cover updated</item>
+        <item quantity="other">%d covers updated</item>
+    </plurals>
+    <plurals name="jobs_count_updates">
+        <item quantity="one">%d update</item>
+        <item quantity="other">%d updates</item>
+    </plurals>
+    <plurals name="jobs_count_new_series">
+        <item quantity="one">%d new series</item>
+        <item quantity="other">%d new series</item>
+    </plurals>
+    <plurals name="jobs_count_titles">
+        <item quantity="one">%d title</item>
+        <item quantity="other">%d titles</item>
+    </plurals>
+    <plurals name="jobs_count_chapters">
+        <item quantity="one">%d chapter</item>
+        <item quantity="other">%d chapters</item>
+    </plurals>
+    <string name="jobs_server_version">Server version %1$s</string>
+    <string name="jobs_paused">Scheduled work is paused: %1$s</string>
+    <string name="jobs_no_checks">The server reported no connection checks.</string>
+    <string name="jobs_check_ok">OK</string>
+    <string name="jobs_check_fail">Failed</string>
+    <string name="jobs_check_unset">Not set up</string>
+    <string name="jobs_check_ms">%1$d ms</string>
+    <string name="jobs_job_running">Running</string>
+    <string name="jobs_job_last_finished">Last finished: %1$s</string>
+    <string name="jobs_job_last_error">Last error: %1$s</string>
 </resources>
