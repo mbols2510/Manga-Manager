@@ -161,6 +161,21 @@ class History:
                              [*args, limit, offset]).fetchall()
         return [_row(r) for r in rows], int(total)
 
+    def changes_since(self, since: int, limit: int) -> list[dict]:
+        """Updates with id > since, oldest first (the Android companion's change feed)."""
+        with self.db.connect() as c:
+            rows = c.execute("SELECT * FROM updates WHERE id > %s ORDER BY id ASC LIMIT %s",
+                             (since, limit)).fetchall()
+        return [_row(r) for r in rows]
+
+    def max_update_id(self) -> int:
+        with self.db.connect() as c:
+            return int(c.execute("SELECT COALESCE(MAX(id), 0) AS n FROM updates").fetchone()["n"])
+
+    def min_update_id(self) -> int:
+        with self.db.connect() as c:
+            return int(c.execute("SELECT COALESCE(MIN(id), 0) AS n FROM updates").fetchone()["n"])
+
     def stats(self) -> dict:
         with self.db.connect() as c:
             row = c.execute("SELECT COUNT(*) AS updates, COALESCE(SUM(is_new::int),0) AS new_series, "

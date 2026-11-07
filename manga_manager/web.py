@@ -115,6 +115,13 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
             return f"{cfg.kavita_public_url}/library/{item['kavita_library_id']}/series/{item['kavita_series_id']}"
         return None
 
+    def decorate_update(item: dict) -> dict:
+        """Dashboard display fields shared by /api/updates and /api/v1/changes."""
+        item["title"] = cfg.display_title(item["title"])
+        item["kavita_url"] = kavita_link(item)
+        item["thumbnail"] = f"thumb/{item['suwayomi_id']}.png" if item.get("suwayomi_id") else None
+        return item
+
     # ------------------------------------------------------------ aliases (#12)
     cfg.dashboard_aliases = history.aliases()
     cfg.dashboard_ranks = history.alias_ranks()
@@ -326,9 +333,7 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
             query=query, also_titles=also,
         )
         for item in items:
-            item["title"] = cfg.display_title(item["title"])
-            item["kavita_url"] = kavita_link(item)
-            item["thumbnail"] = f"thumb/{item['suwayomi_id']}.png" if item.get("suwayomi_id") else None
+            decorate_update(item)
         return jsonify({"items": items, "total": total, "offset": offset, "limit": limit})
 
     @app.get("/api/aliases")
@@ -476,6 +481,8 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
 
     from .v1_devices_routes import build_blueprint as build_devices_blueprint
     app.register_blueprint(build_devices_blueprint(cfg, devices))
+    from .v1_changes_routes import build_blueprint as build_changes_blueprint
+    app.register_blueprint(build_changes_blueprint(cfg, history, decorate_update))
 
     app.context_processor(lambda: {"has_endpoint": lambda name: name in app.view_functions})
     if ctx is not None:
