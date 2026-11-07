@@ -24,13 +24,17 @@ fun httpError(code: Int): HttpException =
 class FakeTokenStore : TokenStore {
     var token: String? = null
     var saves = 0
+    var loads = 0
 
     override fun save(token: String) {
         saves++
         this.token = token
     }
 
-    override fun load(): String? = token
+    override fun load(): String? {
+        loads++
+        return token
+    }
 
     override fun clear() {
         token = null

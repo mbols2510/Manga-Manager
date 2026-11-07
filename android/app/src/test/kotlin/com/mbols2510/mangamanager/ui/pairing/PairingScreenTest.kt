@@ -13,6 +13,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.mbols2510.mangamanager.R
@@ -71,6 +72,22 @@ class PairingScreenTest {
         val field = rule.onNode(hasSetTextAction()).fetchSemanticsNode()
         assertEquals("pasted text is cleared", "", field.config.getOrNull(SemanticsProperties.EditableText)?.text)
         assertNull(tokens.token)
+    }
+
+    @Test
+    fun ime_done_action_submits_the_code_only_when_submit_is_enabled() {
+        show()
+        val error = string(R.string.pairing_error_invalid_code)
+
+        rule.onNode(hasSetTextAction()).performImeAction() // empty field: the button is disabled, so nothing happens
+        rule.waitForIdle()
+        rule.onAllNodesWithText(error).assertCountEquals(0)
+
+        rule.onNode(hasSetTextAction()).performTextInput("definitely not a code")
+        rule.onNode(hasSetTextAction()).performImeAction()
+        waitForText(error)
+        val field = rule.onNode(hasSetTextAction()).fetchSemanticsNode()
+        assertEquals("code cleared after Done", "", field.config.getOrNull(SemanticsProperties.EditableText)?.text)
     }
 
     @Test

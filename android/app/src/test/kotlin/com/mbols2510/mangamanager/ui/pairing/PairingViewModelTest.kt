@@ -1,12 +1,16 @@
 package com.mbols2510.mangamanager.ui.pairing
 
+import androidx.lifecycle.viewModelScope
 import com.mbols2510.mangamanager.R
+import com.mbols2510.mangamanager.data.api.LatestDto
 import com.mbols2510.mangamanager.data.FakeSettingsStore
 import com.mbols2510.mangamanager.data.repo.AuthState
 import java.io.IOException
 import java.net.InetAddress
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.TestScope
@@ -176,6 +180,7 @@ class PairingViewModelTest {
 
     @Test
     fun baseline_failure_rolls_back_token_and_url() = runTest(dispatcher) {
+        auth.markUnauthorized() // a failed re-pair must leave the device flagged for repair
         baselineFailure = IOException("offline")
         val vm = viewModel()
         vm.submit(pairingCode("https://manga.example.com", TOKEN))
@@ -185,6 +190,62 @@ class PairingViewModelTest {
         assertEquals("token and URL were stored before the baseline", TOKEN to "https://manga.example.com/", storedAtBaseline)
         assertNull("token rolled back", tokens.token)
         assertNull("URL rolled back", settings.serverUrl())
+        assertTrue("needsRepair is cleared only after a successful baseline", auth.needsRepair.value)
+    }
+
+    @Test
+    fun cancelled_submit_mid_baseline_rolls_back_token_and_url() = runTest(dispatcher) {
+        auth.markUnauthorized()
+        val baselineStarted = CompletableDeferred<Unit>()
+        val gate = CompletableDeferred<Unit>()
+        val suspendedRepo = FakeUpdatesRepository {
+            baselineStarted.complete(Unit)
+            gate.await()
+        }
+        val vm = PairingViewModel(tokens, settings, auth, suspendedRepo, server, dispatcher)
+
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+
+        assertTrue("baseline is suspended", baselineStarted.isCompleted)
+        assertEquals("token and URL are already stored at this point", TOKEN, tokens.token)
+        assertEquals("https://manga.example.com/", settings.serverUrl())
+        assertEquals(PairingUiState.Validating, vm.state.value)
+
+        vm.viewModelScope.cancel() // what clearing the ViewModel does
+
+        assertNull("token rolled back after cancellation", tokens.token)
+        assertNull("URL rolled back after cancellation", settings.serverUrl())
+        assertTrue("needsRepair untouched: pairing never completed", auth.needsRepair.value)
+        assertEquals(1, suspendedRepo.baselines)
+    }
+
+    @Test
+    fun second_submit_while_validating_is_ignored() = runTest(dispatcher) {
+        val gate = CompletableDeferred<Unit>()
+        val calls = mutableListOf<String?>()
+        val gated = LatestCall { _, token ->
+            calls += token
+            gate.await()
+            if (token == null) throw httpError(401)
+            LatestDto(cursor = 1)
+        }
+        val vm = PairingViewModel(tokens, settings, auth, repo, gated, dispatcher)
+        val code = pairingCode("https://manga.example.com", TOKEN)
+
+        vm.submit(code)
+        assertEquals(PairingUiState.Validating, vm.state.value)
+        vm.submit(code)
+        vm.submit("garbage")
+
+        assertEquals("state stays Validating", PairingUiState.Validating, vm.state.value)
+        assertEquals("only one probe is in flight", listOf<String?>(null), calls)
+
+        gate.complete(Unit)
+
+        assertEquals(PairingUiState.Success, vm.state.value)
+        assertEquals("one probe and one validation in total", listOf<String?>(null, TOKEN), calls)
+        assertEquals(1, tokens.saves)
+        assertEquals(1, repo.baselines)
     }
 
     @Test

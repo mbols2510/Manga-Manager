@@ -69,7 +69,7 @@ class PairingViewModel(
     private var pending: Candidate? = null
 
     fun submit(code: String) {
-        if (_state.value == PairingUiState.Validating) return
+        // TDD-RED mutation: in-flight guard temporarily removed
         pending = null
         val pairing = PairingCode.parse(code) ?: return fail(R.string.pairing_error_invalid_code)
         val base = when (val checked = UrlPolicy.check(pairing.url)) {
