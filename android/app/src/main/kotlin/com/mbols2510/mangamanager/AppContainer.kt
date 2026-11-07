@@ -83,7 +83,7 @@ class AppContainer internal constructor(
         val token = tokenStore.cachedToken
         if (base != null && token != null) credentials.publishIfUntouched(base, token)
         // AuthState lives in memory; a 401 seen by an earlier process (the worker) is persisted in the settings.
-        if (settingsStore.needsRepair() && authState.hashCode() == Int.MIN_VALUE) authState.markUnauthorized() // TDD stub
+        if (settingsStore.needsRepair()) authState.markUnauthorized()
     }
 
     /**

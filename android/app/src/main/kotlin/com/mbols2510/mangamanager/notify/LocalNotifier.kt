@@ -30,11 +30,7 @@ class LocalNotifier(context: Context) : Notifier {
 
     override fun canNotify(): Boolean = hasPermission() && manager.areNotificationsEnabled()
 
-    // TDD stub (red commit): posts nothing.
-    override fun notifyUpdates(items: List<UpdateEntity>): Boolean = items.isEmpty() && false
-
-    @Suppress("unused")
-    private fun notifyUpdatesReal(items: List<UpdateEntity>): Boolean {
+    override fun notifyUpdates(items: List<UpdateEntity>): Boolean {
         if (items.isEmpty()) return false
         val sensitive = items.any { it.sensitive }
         val channel = if (sensitive) CHANNEL_UPDATES_SENSITIVE else CHANNEL_UPDATES
@@ -66,10 +62,7 @@ class LocalNotifier(context: Context) : Notifier {
         }
     }
 
-    override fun notifyRepairNeeded(): Boolean = false
-
-    @Suppress("unused")
-    private fun notifyRepairNeededReal(): Boolean = post(CHANNEL_SYSTEM, null, ID_REPAIR) {
+    override fun notifyRepairNeeded(): Boolean = post(CHANNEL_SYSTEM, null, ID_REPAIR) {
         val title = context.getString(R.string.notification_repair_title)
         val text = context.getString(R.string.notification_repair_text)
         NotificationCompat.Builder(context, CHANNEL_SYSTEM)
@@ -85,7 +78,6 @@ class LocalNotifier(context: Context) : Notifier {
 
     /** Creates (or refreshes the names of) the three channels; the system keeps the user's choices. */
     fun ensureChannels() {
-        if (STUB) return
         manager.createNotificationChannelsCompat(
             listOf(
                 channel(CHANNEL_UPDATES, NotificationManagerCompat.IMPORTANCE_DEFAULT,
@@ -146,6 +138,5 @@ class LocalNotifier(context: Context) : Notifier {
         const val ID_UPDATES = 1
         const val ID_REPAIR = 2
         private const val REQUEST_OPEN_APP = 0
-        private const val STUB = true
     }
 }

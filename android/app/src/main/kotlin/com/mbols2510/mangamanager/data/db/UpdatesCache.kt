@@ -56,8 +56,7 @@ class RoomUpdatesCache internal constructor(
         }
     }
 
-    // TDD stub (red commit).
-    override suspend fun pendingNotifications(): List<UpdateEntity> = emptyList()
+    override suspend fun pendingNotifications(): List<UpdateEntity> = dao.pendingNotifications()
 
     private companion object {
         const val MAX_IDS_PER_QUERY = 500

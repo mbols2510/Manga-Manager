@@ -20,7 +20,6 @@ import java.util.concurrent.TimeUnit
 class Scheduler(private val workManager: WorkManager) {
 
     fun apply(settings: CheckSettings) {
-        if (STUB) return // TDD stub (red commit)
         if (settings.intervalMinutes == null) {
             cancel()
             return
@@ -29,13 +28,11 @@ class Scheduler(private val workManager: WorkManager) {
     }
 
     fun cancel() {
-        if (STUB) return
         workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
     }
 
     companion object {
         const val UNIQUE_WORK_NAME = "manga_update_check"
-        private const val STUB = true
 
         /** First retry after 30 s, doubling; the worker stops retrying after [CheckWorker.MAX_RETRY_ATTEMPTS]. */
         const val BACKOFF_SECONDS = 30L

@@ -152,6 +152,7 @@ class PairingViewModel(
                 // The first background check must never notify about items that existed before pairing.
                 repository.baseline()
                 // Only now is the device really paired: a failed re-pair keeps needsRepair set.
+                settings.setNeedsRepair(false)
                 authState.clear()
             }
         } catch (e: CancellationException) {
@@ -164,7 +165,7 @@ class PairingViewModel(
         // The pairing is complete; failing to schedule (unexpected) must not undo it. MangaApp retries at next start.
         withContext(ioDispatcher) {
             try {
-                if (afterPaired.hashCode() == Int.MIN_VALUE) afterPaired() // TDD stub (red commit): not called
+                afterPaired()
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {

@@ -80,13 +80,11 @@ class DataStoreSettingsStore internal constructor(private val store: DataStore<P
         store.edit { if (url == null) it.remove(SERVER_URL) else it[SERVER_URL] = url }
     }
 
-    // TDD stub (red commit): defaults only, writes ignored.
-    override val checkSettings: Flow<CheckSettings> = prefs.map { if (STUB) CheckSettings.DEFAULT else it.toCheckSettings() }
+    override val checkSettings: Flow<CheckSettings> = prefs.map { it.toCheckSettings() }
 
     override suspend fun checkSettings(): CheckSettings = checkSettings.first()
 
     override suspend fun setCheckSettings(settings: CheckSettings) {
-        if (STUB) return
         store.edit {
             // 0 stores "off" so that an absent key can keep meaning "default interval"; real values are clamped.
             it[INTERVAL_MINUTES] = settings.intervalMinutes
@@ -105,7 +103,7 @@ class DataStoreSettingsStore internal constructor(private val store: DataStore<P
         }
     }
 
-    override val lastSuccessfulCheckAt: Flow<Long?> = prefs.map { if (STUB) null else it[LAST_SUCCESSFUL_CHECK] }
+    override val lastSuccessfulCheckAt: Flow<Long?> = prefs.map { it[LAST_SUCCESSFUL_CHECK] }
 
     override suspend fun lastSuccessfulCheckAt(): Long? = lastSuccessfulCheckAt.first()
 
@@ -113,7 +111,7 @@ class DataStoreSettingsStore internal constructor(private val store: DataStore<P
         store.edit { if (epochMillis == null) it.remove(LAST_SUCCESSFUL_CHECK) else it[LAST_SUCCESSFUL_CHECK] = epochMillis }
     }
 
-    override val needsRepair: Flow<Boolean> = prefs.map { if (STUB) false else it[NEEDS_REPAIR] ?: false }
+    override val needsRepair: Flow<Boolean> = prefs.map { it[NEEDS_REPAIR] ?: false }
 
     override suspend fun needsRepair(): Boolean = needsRepair.first()
 
@@ -154,7 +152,6 @@ class DataStoreSettingsStore internal constructor(private val store: DataStore<P
         val LAST_SUCCESSFUL_CHECK = longPreferencesKey("last_successful_check_at")
         val NEEDS_REPAIR = booleanPreferencesKey("needs_repair")
         const val INTERVAL_OFF = 0
-        const val STUB = true
         const val SECONDS_PER_MINUTE = 60
         const val MINUTES_PER_DAY = 24 * 60
     }

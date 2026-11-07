@@ -50,11 +50,7 @@ class CheckWorker(
         val warmUpTimeoutMillis: Long = WARM_UP_TIMEOUT_MILLIS,
     )
 
-    // TDD stub (red commit): does nothing.
-    override suspend fun doWork(): Result = Result.success()
-
-    @Suppress("unused")
-    private suspend fun doWorkReal(): Result {
+    override suspend fun doWork(): Result {
         // A stuck warm-up (Keystore, storage) must not hold the worker: give up and let the backoff retry.
         val warmed = try {
             withTimeoutOrNull(deps.warmUpTimeoutMillis) { deps.warmUp() } != null
