@@ -7,7 +7,7 @@ from manga_manager.context import AppContext
 from manga_manager.db import Database
 from manga_manager.settings import Settings
 
-TABLES = "updates, cover_uploads, runs, aliases, users, settings, kv, activity"
+TABLES = "updates, cover_uploads, runs, aliases, users, settings, kv, activity, device_tokens"
 
 
 @pytest.fixture(scope="session")

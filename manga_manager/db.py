@@ -100,6 +100,16 @@ CREATE TABLE IF NOT EXISTS activity (
     data       JSONB
 );
 CREATE INDEX IF NOT EXISTS idx_activity_created ON activity (created_at DESC);
+-- Per-device bearer tokens for the Android companion; only the SHA-256 hash is stored.
+CREATE TABLE IF NOT EXISTS device_tokens (
+    id         BIGSERIAL PRIMARY KEY,
+    name       TEXT NOT NULL,
+    user_name  TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_seen  TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ
+);
 """
 
 
