@@ -45,25 +45,29 @@ internal fun sameOrigin(a: HttpUrl, b: HttpUrl): Boolean = a.scheme == b.scheme 
  * Application interceptor (runs once per call, before redirects):
  * - checks [UrlPolicy] on the request URL before any network access;
  * - adds `Authorization: Bearer <token>` only when the request goes to the paired server ([baseUrl]'s origin),
- *   reading the token lazily; with no token it sends no header (the server then answers 401);
+ *   reading the token lazily; with no token or no known base it sends no header (the server then answers 401);
  * - calls [onUnauthorized] when the final answer is a 401 from the paired server's origin.
  * It logs nothing, and [toString] does not expose the token.
  */
 class AuthInterceptor(
-    private val baseUrl: HttpUrl,
+    private val baseUrl: () -> HttpUrl?,
     private val token: () -> String?,
     private val onUnauthorized: () -> Unit = {},
 ) : Interceptor {
+    constructor(baseUrl: HttpUrl, token: () -> String?, onUnauthorized: () -> Unit = {}) :
+        this({ baseUrl }, token, onUnauthorized)
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         enforceUrlPolicy(request.url)
+        val base = baseUrl()
         val builder = request.newBuilder().removeHeader(AUTHORIZATION)
-        if (sameOrigin(request.url, baseUrl)) {
+        if (base != null && sameOrigin(request.url, base)) {
             usableToken(token())?.let { builder.header(AUTHORIZATION, "Bearer $it") }
         }
         val response = chain.proceed(builder.build())
         // Only the paired server's 401 says something about our token; a redirect target's 401 does not.
-        if (response.code == 401 && sameOrigin(response.request.url, baseUrl)) onUnauthorized()
+        if (response.code == 401 && base != null && sameOrigin(response.request.url, base)) onUnauthorized()
         return response
     }
 
@@ -71,7 +75,30 @@ class AuthInterceptor(
     private fun usableToken(t: String?): String? =
         t?.takeIf { it.isNotEmpty() && it.all { c -> c in '!'..'~' } }
 
-    override fun toString(): String = "AuthInterceptor(baseUrl=$baseUrl)"
+    override fun toString(): String = "AuthInterceptor"
+}
+
+/**
+ * Application interceptor of the shared client, placed before [AuthInterceptor]. The paired-server gate runs at
+ * request time, so the client itself needs no URL or token to be built: after [UrlPolicy], a request fails with
+ * [NotPairedException] (before any socket is opened) when the paired base is not known, no token is cached, or
+ * the destination's scheme, host or port differs from the paired base. That also stops an image URL pointing
+ * anywhere else. The message never contains a URL or a token. Both suppliers must be non-blocking memory reads.
+ */
+internal class PairedServerGate(
+    private val baseUrl: () -> HttpUrl?,
+    private val token: () -> String?,
+) : Interceptor {
+    override fun intercept(chain: Interceptor.Chain): Response {
+        val request = chain.request()
+        enforceUrlPolicy(request.url)
+        val base = baseUrl() ?: throw NotPairedException("Not paired with a server")
+        if (token() == null) throw NotPairedException("Not paired with a server")
+        if (!sameOrigin(request.url, base)) throw NotPairedException("Request blocked: not the paired server")
+        return chain.proceed(request)
+    }
+
+    override fun toString(): String = "PairedServerGate"
 }
 
 /**
@@ -80,18 +107,21 @@ class AuthInterceptor(
  * such redirects), and strips `Authorization` from any hop that leaves the paired server's origin. This does
  * not rely on OkHttp's own cross-host header stripping. It logs nothing.
  */
-class RedirectGuardInterceptor(private val baseUrl: HttpUrl) : Interceptor {
+class RedirectGuardInterceptor(private val baseUrl: () -> HttpUrl?) : Interceptor {
+    constructor(baseUrl: HttpUrl) : this({ baseUrl })
+
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
         enforceUrlPolicy(request.url)
-        if (request.url.scheme != baseUrl.scheme) {
+        val base = baseUrl() ?: throw NotPairedException("Not paired with a server")
+        if (request.url.scheme != base.scheme) {
             throw UrlPolicyViolation("Request blocked: redirect to a different scheme")
         }
-        val hop = if (sameOrigin(request.url, baseUrl)) request else request.newBuilder().removeHeader(AUTHORIZATION).build()
+        val hop = if (sameOrigin(request.url, base)) request else request.newBuilder().removeHeader(AUTHORIZATION).build()
         return chain.proceed(hop)
     }
 
-    override fun toString(): String = "RedirectGuardInterceptor(baseUrl=$baseUrl)"
+    override fun toString(): String = "RedirectGuardInterceptor"
 }
 
 /**

@@ -220,38 +220,59 @@ class DefaultUpdatesRepository internal constructor(
 }
 
 /**
- * Production [MangaApi] supplier for the stored pairing: re-checks the stored URL with [UrlPolicy], reads the
- * token lazily from [tokenStore] on every request, routes every 401 to [authState], and reuses the client
- * while the URL is unchanged. Returns null when not paired or the stored URL is no longer acceptable.
- * Keep ONE instance per process: [client] exposes the same OkHttpClient (for Coil), so images and API calls
- * share one connection pool and the same transport rules.
+ * The paired server's base URL as [UrlPolicy] normalizes it, or null when [stored] is null or no longer acceptable.
+ * [stored] must be a non-blocking memory read; the last parse is remembered so a request costs a string compare.
+ */
+class PairedBaseUrl(private val stored: () -> String?) : () -> HttpUrl? {
+    @Volatile
+    private var memo: Pair<String, HttpUrl?>? = null
+
+    override fun invoke(): HttpUrl? {
+        val raw = stored() ?: return null
+        memo?.let { if (it.first == raw) return it.second }
+        val url = (UrlPolicy.check(raw) as? UrlCheck.Ok)?.normalized
+        memo = raw to url
+        return url
+    }
+}
+
+/**
+ * Production [MangaApi] supplier for the stored pairing, over the ONE shared [client]. The base URL is resolved
+ * when the supplier is called ([baseUrl] is a memory read), so a re-pair to a different server only builds a new
+ * Retrofit instance over the same client; the client is never rebuilt. Returns null when not paired or the stored
+ * URL is no longer acceptable. While [ready] is false (the in-memory pairing cache is not filled yet) it throws,
+ * which the repository reports as Offline instead of "not paired".
+ * Nothing here reads storage or the Keystore, and no lock is held across anything slow.
  */
 class StoredPairingApi(
-    private val storedUrl: () -> String?,
-    private val tokenStore: TokenStore,
-    private val authState: AuthState,
+    private val ready: () -> Boolean,
+    private val baseUrl: () -> HttpUrl?,
+    private val hasToken: () -> Boolean,
+    private val client: OkHttpClient,
 ) : () -> MangaApi? {
-    private class Built(val url: HttpUrl, val client: OkHttpClient, val api: MangaApi)
+    /** Self-contained form: its own shared client over [storedUrl] and [tokenStore] (reads must be non-blocking). */
+    constructor(storedUrl: () -> String?, tokenStore: TokenStore, authState: AuthState) :
+        this(PairedBaseUrl(storedUrl), tokenStore, authState)
 
-    private var cached: Built? = null
+    private constructor(base: PairedBaseUrl, tokenStore: TokenStore, authState: AuthState) : this(
+        ready = { true },
+        baseUrl = base,
+        hasToken = { tokenStore.load() != null },
+        client = MangaApiFactory.sharedClient(base, tokenStore::load, authState::markUnauthorized),
+    )
 
-    /** The API for the stored pairing, or null when no token is stored (this reads the token store once). */
-    override fun invoke(): MangaApi? = current(requireToken = true)?.api
+    private val lock = Any()
+    private var cached: Pair<HttpUrl, MangaApi>? = null
 
-    /**
-     * The OkHttpClient behind [invoke] (same token, interceptors and 401 routing), or null when no acceptable URL
-     * is stored. It reads [storedUrl] but never the token store here: the token is read per request, on the
-     * thread that executes the request. [storedUrl] must therefore be cheap and non-blocking.
-     */
-    fun client(): OkHttpClient? = current(requireToken = false)?.client
-
-    @Synchronized
-    private fun current(requireToken: Boolean): Built? {
-        val url = (UrlPolicy.check(storedUrl() ?: return null) as? UrlCheck.Ok)?.normalized ?: return null
-        if (requireToken && tokenStore.load() == null) return null
-        cached?.let { if (it.url == url) return it }
-        val client = MangaApiFactory.client(url, tokenStore::load, authState::markUnauthorized)
-        val api = MangaApiFactory.retrofit(url, client).create(MangaApi::class.java)
-        return Built(url, client, api).also { cached = it }
+    override fun invoke(): MangaApi? {
+        check(ready()) { "Pairing settings are not loaded yet" }
+        val base = baseUrl() ?: return null
+        if (!hasToken()) return null
+        synchronized(lock) {
+            cached?.let { (u, api) -> if (u == base) return api }
+            val api = MangaApiFactory.retrofit(base, client).create(MangaApi::class.java)
+            cached = base to api
+            return api
+        }
     }
 }

@@ -12,9 +12,9 @@ class MangaApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        // Fill the in-memory settings cache off the main thread; nothing waits for it on the main thread.
+        // Fill the in-memory pairing caches (URL and token) off the main thread; nothing waits for it on the main thread.
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
-            runCatching { container.settingsStore.warmUp() }
+            runCatching { container.warmUp() }
         }
     }
 }

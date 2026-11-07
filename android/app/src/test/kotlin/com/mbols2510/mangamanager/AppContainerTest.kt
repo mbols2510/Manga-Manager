@@ -2,22 +2,33 @@ package com.mbols2510.mangamanager
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.mbols2510.mangamanager.core.TokenStore
 import com.mbols2510.mangamanager.data.FakeSettingsStore
 import com.mbols2510.mangamanager.data.SettingsStore
+import com.mbols2510.mangamanager.data.api.NotPairedException
 import com.mbols2510.mangamanager.data.repo.CheckResult
 import com.mbols2510.mangamanager.ui.pairing.FakeTokenStore
+import java.io.IOException
+import java.net.InetAddress
 import java.util.concurrent.Callable
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.runBlocking
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -31,18 +42,49 @@ private class HangingSettingsStore : SettingsStore {
     override suspend fun clearAll() = awaitCancellation()
 }
 
+/** A Keystore that is stuck decrypting until [release] is called. */
+private class BlockedTokenStore : TokenStore {
+    val release = CountDownLatch(1)
+    val entered = CountDownLatch(1)
+    override fun save(token: String) = Unit
+    override fun load(): String? {
+        entered.countDown()
+        release.await()
+        return null
+    }
+    override fun clear() = Unit
+}
+
 @RunWith(RobolectricTestRunner::class)
 class AppContainerTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
+    private val servers = mutableListOf<MockWebServer>()
+    private val executors = mutableListOf<java.util.concurrent.ExecutorService>()
+
+    @After
+    fun tearDown() {
+        servers.forEach { runCatching { it.shutdown() } }
+        executors.forEach { it.shutdownNow() }
+    }
+
+    private fun server(): MockWebServer =
+        MockWebServer().apply { start(InetAddress.getByName("127.0.0.1"), 0) }.also { servers += it }
+
+    private fun <T> onOtherThread(block: () -> T): java.util.concurrent.Future<T> {
+        val executor = Executors.newSingleThreadExecutor().also { executors += it }
+        return executor.submit(Callable { block() })
+    }
 
     /** Runs [block] on a plain thread and fails (instead of hanging the build) if it takes longer than 5 s. */
-    private fun <T> withinFiveSeconds(block: () -> T): T {
-        val executor = Executors.newSingleThreadExecutor()
-        try {
-            return executor.submit(Callable { block() }).get(5, TimeUnit.SECONDS)
-        } finally {
-            executor.shutdownNow()
-        }
+    private fun <T> withinFiveSeconds(block: () -> T): T = onOtherThread(block).get(5, TimeUnit.SECONDS)
+
+    private fun OkHttpClient.get(url: okhttp3.HttpUrl) {
+        newCall(Request.Builder().url(url).build()).execute().close()
+    }
+
+    private fun pair(container: AppContainer, server: MockWebServer, token: String) = runBlocking {
+        container.settingsStore.setServerUrl(server.url("/").toString())
+        container.tokenStore.save(token)
     }
 
     @Test
@@ -51,18 +93,32 @@ class AppContainerTest {
         val container = AppContainer(context, HangingSettingsStore(), tokens)
 
         val result = withinFiveSeconds {
-            Triple(
-                container.httpClient(),
-                runBlocking { container.updatesRepository.checkForChanges() },
-                container.settingsStore.isLoaded,
-            )
+            val client = container.httpClient()
+            val refused = runCatching { client.get(okhttp3.HttpUrl.Builder().scheme("http").host("127.0.0.1").port(1).build()) }
+            Triple(client, refused.exceptionOrNull(), runBlocking { container.updatesRepository.checkForChanges() })
         }
 
-        assertNull("no client before the settings cache is filled", result.first)
-        assertEquals("repository answers Offline instead of hanging", CheckResult.Offline, result.second)
-        assertFalse(result.third)
+        assertNotNull("the client exists before anything is loaded", result.first)
+        assertTrue("a request through it fails fast: ${result.second}", result.second is NotPairedException)
+        assertEquals("repository answers Offline instead of hanging", CheckResult.Offline, result.third)
         assertFalse("Offline does not flag the device for re-pairing", container.authState.needsRepair.value)
         assertEquals("the token store was not touched", 0, tokens.loads)
+    }
+
+    @Test
+    fun shared_client_is_never_null_and_same_instance() {
+        val container = AppContainer(context, FakeSettingsStore(), FakeTokenStore())
+        val (first, second) = withinFiveSeconds { container.httpClient() to container.httpClient() }
+        assertNotNull(first)
+        assertSame(first, second)
+
+        pair(container, server(), "tok_first_0123456789")
+        assertSame("pairing does not rebuild the client", first, container.httpClient())
+        runBlocking {
+            container.settingsStore.clearAll()
+            container.tokenStore.clear()
+        }
+        assertSame("unpairing does not rebuild the client", first, container.httpClient())
     }
 
     @Test
@@ -73,9 +129,26 @@ class AppContainerTest {
 
         val (first, second) = withinFiveSeconds { container.httpClient() to container.httpClient() }
 
-        assertNotNull(first)
         assertSame("one shared client", first, second)
         assertEquals("building the client reads no token (Keystore)", 0, tokens.loads)
+    }
+
+    @Test
+    fun a_stuck_keystore_read_does_not_block_the_client() {
+        val keystore = BlockedTokenStore()
+        val container = AppContainer(context, FakeSettingsStore(), keystore)
+        val warming = onOtherThread { runBlocking { container.warmUp() } }
+        assertTrue("warm-up is inside the Keystore read", keystore.entered.await(5, TimeUnit.SECONDS))
+
+        // Another thread (the main thread in production) gets the client immediately: no shared monitor.
+        val client = withinFiveSeconds { container.httpClient() }
+        assertNotNull(client)
+        val refused = withinFiveSeconds { runCatching { client.get(server().url("/")) }.exceptionOrNull() }
+        assertTrue("cold cache: $refused", refused is NotPairedException)
+        assertFalse("warm-up is still stuck", warming.isDone)
+
+        keystore.release.countDown()
+        warming.get(5, TimeUnit.SECONDS)
     }
 
     @Test
@@ -86,10 +159,64 @@ class AppContainerTest {
         runBlocking { store.setServerUrl("https://manga.example.com/") }
         assertTrue(store.isLoaded)
         assertEquals("https://manga.example.com/", store.requireCachedServerUrl())
-        assertNotNull(container.httpClient())
 
         runBlocking { store.clearAll() }
         assertNull(store.requireCachedServerUrl())
-        assertNull("not paired: no client", container.httpClient())
+    }
+
+    @Test
+    fun unpair_clears_the_caches_and_the_next_request_fails_not_paired() {
+        val container = AppContainer(context, FakeSettingsStore(), FakeTokenStore())
+        val a = server()
+        pair(container, a, "tok_first_0123456789")
+        a.enqueue(MockResponse().setBody("ok"))
+        container.httpClient().get(a.url("/api/status"))
+        assertEquals("Bearer tok_first_0123456789", a.takeRequest().getHeader("Authorization"))
+
+        container.tokenStore.clear()
+        runBlocking { container.settingsStore.clearAll() }
+
+        assertNull(container.tokenStore.cachedToken)
+        assertNull(container.settingsStore.cachedServerUrl)
+        assertNull("no API when unpaired", container.pairingApi())
+        val e = assertThrows(IOException::class.java) { container.httpClient().get(a.url("/api/status")) }
+        assertTrue("$e", e is NotPairedException)
+        assertEquals("only the first request reached the server", 1, a.requestCount)
+    }
+
+    @Test
+    fun repair_to_a_different_server_url_uses_the_new_server_and_token() = runBlocking {
+        val container = AppContainer(context, FakeSettingsStore(), FakeTokenStore())
+        val a = server()
+        val b = server()
+        pair(container, a, "tok_first_0123456789")
+        a.enqueue(MockResponse().setBody("""{"cursor":1}""").setHeader("Content-Type", "application/json"))
+        assertEquals(1L, container.pairingApi()!!.latest().cursor)
+        assertEquals("Bearer tok_first_0123456789", a.takeRequest().getHeader("Authorization"))
+        val client = container.httpClient()
+
+        pair(container, b, "tok_second_9876543210")
+        b.enqueue(MockResponse().setBody("""{"cursor":2}""").setHeader("Content-Type", "application/json"))
+        assertEquals(2L, container.pairingApi()!!.latest().cursor)
+        assertEquals("Bearer tok_second_9876543210", b.takeRequest().getHeader("Authorization"))
+
+        assertSame("same client after the re-pair", client, container.httpClient())
+        assertThrows(NotPairedException::class.java) { client.get(a.url("/api/status")) }
+        assertEquals("the old server got nothing more", 1, a.requestCount)
+    }
+
+    @Test
+    fun coil_style_image_requests_are_gated_to_the_paired_origin() {
+        val container = AppContainer(context, FakeSettingsStore(), FakeTokenStore())
+        val a = server()
+        val other = server()
+        pair(container, a, "tok_first_0123456789")
+        a.enqueue(MockResponse().setBody("png"))
+
+        container.httpClient().get(a.url("/thumb/5.png"))
+        assertEquals("Bearer tok_first_0123456789", a.takeRequest().getHeader("Authorization"))
+
+        assertThrows(NotPairedException::class.java) { container.httpClient().get(other.url("/thumb/5.png")) }
+        assertEquals("rejected before any network event", 0, other.requestCount)
     }
 }

@@ -16,6 +16,56 @@ interface TokenStore {
     fun clear()
 }
 
+/**
+ * Keeps the token in memory so request paths never touch the Keystore. [warmUp] does the one decrypt (call it off
+ * the main thread, at startup); [save] and [clear] write through to [delegate] and update the cache. [load] and
+ * [cachedToken] only read memory and are null while cold. The token is never logged and not in any toString().
+ */
+class CachingTokenStore(private val delegate: TokenStore) : TokenStore {
+    private val lock = Any()
+
+    @Volatile
+    private var loaded = false
+
+    @Volatile
+    private var token: String? = null
+
+    /** True once the token state is known (decrypted by [warmUp] or written through this store). */
+    val isLoaded: Boolean get() = loaded
+
+    val cachedToken: String? get() = token
+
+    /** Blocking Keystore read; no lock is held while it runs. A newer [save] or [clear] wins over a late read. */
+    fun warmUp() {
+        val read = delegate.load()
+        synchronized(lock) {
+            if (!loaded) {
+                token = read
+                loaded = true
+            }
+        }
+    }
+
+    override fun save(token: String) {
+        delegate.save(token)
+        put(token)
+    }
+
+    override fun load(): String? = token
+
+    override fun clear() {
+        delegate.clear()
+        put(null)
+    }
+
+    private fun put(value: String?) = synchronized(lock) {
+        token = value
+        loaded = true
+    }
+
+    override fun toString(): String = "CachingTokenStore"
+}
+
 /** Seam so the encryption logic runs on the JVM. Blob layout: 12-byte IV, then ciphertext and GCM tag. */
 internal interface TokenCipher {
     fun encrypt(plain: ByteArray): ByteArray

@@ -53,9 +53,13 @@ object MangaApiFactory {
     fun client(baseUrl: HttpUrl, token: () -> String?, onUnauthorized: () -> Unit = {}): OkHttpClient =
         buildClient(baseUrl, token, onUnauthorized)
 
-    /** TDD stub: the gated shared client arrives in the next commit. */
+    /**
+     * The ONE client of the app for the paired server (API calls through Retrofit and image loading), built once
+     * and never rebuilt. Nothing is read to build it: [baseUrl] (null until paired) and [token] are read per
+     * request and must be non-blocking memory reads. Requests are gated on the paired origin, see [PairedServerGate].
+     */
     fun sharedClient(baseUrl: () -> HttpUrl?, token: () -> String?, onUnauthorized: () -> Unit = {}): OkHttpClient =
-        OkHttpClient()
+        newClient(baseUrl, token, onUnauthorized, MAX_BODY_BYTES, gated = true)
 
     internal fun retrofit(baseUrl: HttpUrl, client: OkHttpClient): Retrofit = Retrofit.Builder()
         .baseUrl(baseUrl)
@@ -78,7 +82,17 @@ object MangaApiFactory {
         maxBodyBytes: Long = MAX_BODY_BYTES,
     ): OkHttpClient {
         val base = checkedBase(baseUrl)
-        return OkHttpClient.Builder()
+        return newClient({ base }, token, onUnauthorized, maxBodyBytes, gated = false)
+    }
+
+    private fun newClient(
+        baseUrl: () -> HttpUrl?,
+        token: () -> String?,
+        onUnauthorized: () -> Unit,
+        maxBodyBytes: Long,
+        gated: Boolean,
+    ): OkHttpClient {
+        val builder = OkHttpClient.Builder()
             .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .writeTimeout(WRITE_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -86,9 +100,11 @@ object MangaApiFactory {
             .followRedirects(true)
             .followSslRedirects(false)
             .proxySelector(CleartextNoProxySelector(ProxySelector.getDefault()))
-            .addInterceptor(AuthInterceptor(base, token, onUnauthorized))
+        if (gated) builder.addInterceptor(PairedServerGate(baseUrl, token))
+        return builder
+            .addInterceptor(AuthInterceptor(baseUrl, token, onUnauthorized))
             .addInterceptor(BodySizeLimitInterceptor(maxBodyBytes))
-            .addNetworkInterceptor(RedirectGuardInterceptor(base))
+            .addNetworkInterceptor(RedirectGuardInterceptor(baseUrl))
             .build()
     }
 }

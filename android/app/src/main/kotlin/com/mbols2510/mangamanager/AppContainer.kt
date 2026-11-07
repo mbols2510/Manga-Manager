@@ -4,15 +4,18 @@ import android.content.Context
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.mbols2510.mangamanager.core.CachingTokenStore
 import com.mbols2510.mangamanager.core.KeystoreTokenStore
 import com.mbols2510.mangamanager.core.TokenStore
 import com.mbols2510.mangamanager.data.CachingSettingsStore
 import com.mbols2510.mangamanager.data.DataStoreSettingsStore
 import com.mbols2510.mangamanager.data.SettingsStore
+import com.mbols2510.mangamanager.data.api.MangaApiFactory
 import com.mbols2510.mangamanager.data.db.AppDatabase
 import com.mbols2510.mangamanager.data.db.RoomUpdatesCache
 import com.mbols2510.mangamanager.data.repo.AuthState
 import com.mbols2510.mangamanager.data.repo.DefaultUpdatesRepository
+import com.mbols2510.mangamanager.data.repo.PairedBaseUrl
 import com.mbols2510.mangamanager.data.repo.StoredPairingApi
 import com.mbols2510.mangamanager.data.repo.UpdatesRepository
 import com.mbols2510.mangamanager.ui.AppViewModel
@@ -33,7 +36,8 @@ class AppContainer internal constructor(
     private val appContext = context.applicationContext
 
     val authState: AuthState = AuthState()
-    val tokenStore: TokenStore by lazy { tokens ?: KeystoreTokenStore(appContext) }
+    /** Caches the token in memory; call [CachingTokenStore.warmUp] off the main thread at startup. */
+    val tokenStore: CachingTokenStore by lazy { CachingTokenStore(tokens ?: KeystoreTokenStore(appContext)) }
 
     /** Caches the server URL in memory; call [CachingSettingsStore.warmUp] off the main thread at startup. */
     val settingsStore: CachingSettingsStore by lazy {
@@ -41,22 +45,40 @@ class AppContainer internal constructor(
     }
     val database: AppDatabase by lazy { AppDatabase.build(appContext) }
 
-    /**
-     * The client for the stored pairing. It reads the URL from the in-memory cache only (no DataStore, no
-     * runBlocking) and the token per request; an unfilled cache makes the repository's API supplier throw, which
-     * the repository reports as Offline.
-     */
-    val pairingApi: StoredPairingApi by lazy {
-        StoredPairingApi(storedUrl = { settingsStore.requireCachedServerUrl() }, tokenStore, authState)
-    }
+    private val baseUrl = PairedBaseUrl { settingsStore.cachedServerUrl }
 
     /**
-     * The shared OkHttpClient of the stored pairing (for Coil). Safe to call from any thread, including the main
-     * thread: it never blocks and never touches DataStore or the Keystore. Returns null until the settings cache is
-     * warm or when the device is not paired; ask again after pairing. Requests made with it read the token on the
-     * calling thread of the request.
+     * THE OkHttpClient of the app (API calls and, in Task 10, Coil): built once, never null, never rebuilt, and it
+     * reads nothing to be built. The paired base URL and the token come from the in-memory caches on every
+     * request, and a request fails with `NotPairedException` (no socket opened) while the caches are cold, nothing
+     * is paired, or the destination is not the paired origin. Safe to call and to use from any thread, including
+     * the main thread: no DataStore, no Keystore, no lock shared with them.
      */
-    fun httpClient(): OkHttpClient? = if (settingsStore.isLoaded) pairingApi.client() else null
+    private val sharedClient: OkHttpClient by lazy {
+        MangaApiFactory.sharedClient(
+            baseUrl = baseUrl,
+            token = { tokenStore.cachedToken },
+            onUnauthorized = authState::markUnauthorized,
+        )
+    }
+
+    fun httpClient(): OkHttpClient = sharedClient
+
+    /** Fills both in-memory caches (Keystore decrypt, DataStore read). Blocking: call on `Dispatchers.IO`. */
+    suspend fun warmUp() {
+        tokenStore.warmUp()
+        settingsStore.warmUp()
+    }
+
+    /** API supplier for the repository: Offline-by-exception while the caches are cold, null when not paired. */
+    val pairingApi: StoredPairingApi by lazy {
+        StoredPairingApi(
+            ready = { settingsStore.isLoaded && tokenStore.isLoaded },
+            baseUrl = baseUrl,
+            hasToken = { tokenStore.cachedToken != null },
+            client = sharedClient,
+        )
+    }
 
     /** Single instance: it holds the lock that serializes checks. */
     val updatesRepository: UpdatesRepository by lazy {

@@ -18,8 +18,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.mbols2510.mangamanager.core.TokenStore
-import com.mbols2510.mangamanager.data.SettingsStore
+import com.mbols2510.mangamanager.core.CachingTokenStore
+import com.mbols2510.mangamanager.data.CachingSettingsStore
 import com.mbols2510.mangamanager.data.repo.AuthState
 import com.mbols2510.mangamanager.ui.pairing.PairingScreen
 import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
@@ -33,8 +33,8 @@ import kotlinx.coroutines.withContext
 
 /** Decides, off the main thread, whether a pairing (token and server URL) is stored. */
 class AppViewModel(
-    tokenStore: TokenStore,
-    settings: SettingsStore,
+    tokenStore: CachingTokenStore,
+    settings: CachingSettingsStore,
     authState: AuthState,
     ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
@@ -47,7 +47,10 @@ class AppViewModel(
     init {
         viewModelScope.launch {
             paired.value = withContext(ioDispatcher) {
-                runCatching { tokenStore.load() != null && settings.serverUrl() != null }.getOrDefault(false)
+                runCatching {
+                    tokenStore.warmUp() // the one Keystore decrypt, off the main thread; also fills the cache
+                    tokenStore.load() != null && settings.serverUrl() != null
+                }.getOrDefault(false)
             }
         }
     }

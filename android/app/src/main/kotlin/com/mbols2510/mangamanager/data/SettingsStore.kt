@@ -75,6 +75,9 @@ class CachingSettingsStore(private val delegate: SettingsStore) : SettingsStore 
     /** True once the URL is known (read from the delegate or written through this store). */
     val isLoaded: Boolean get() = loaded
 
+    /** The cached URL, never touching storage; null while cold and when not paired (see [isLoaded]). */
+    val cachedServerUrl: String? get() = url
+
     /**
      * The cached URL, never touching storage. Throws [IllegalStateException] until [isLoaded], so a caller that
      * runs too early fails (the repository maps that to Offline) instead of reading "not paired".
