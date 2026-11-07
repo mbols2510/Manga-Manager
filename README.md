@@ -84,6 +84,16 @@ docker compose run --rm \
   manga-manager import-legacy --move-manga /old/mm/history.db --double-chapters /old/dc --collections /old/col
 ```
 
+## Android app
+
+A companion Android app lives in `android/` and is under development; it is not built or released yet. It will
+show the same updates feed on a phone and notify on new chapters.
+
+To prepare a device, sign in as an administrator, open **Settings > Devices**, name the device and press
+**Create device**. The pairing code and QR appear once: scan or paste them into the app to pair it, and revoke
+the device from the same card whenever you like. Device tokens need dashboard login to be enabled. The API the
+app uses is documented in [docs/api-v1.md](docs/api-v1.md).
+
 ## Development
 
 ```bash

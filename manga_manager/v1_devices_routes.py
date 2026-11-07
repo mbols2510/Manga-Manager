@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 
+import segno
 from flask import Blueprint, jsonify, request, session
 
 from .config import Config
@@ -46,7 +47,12 @@ def build_blueprint(cfg: Config, store: DeviceStore) -> Blueprint:
         device_id, token = store.create(name, user)
         log.info("Device token %d (%r) created by %s", device_id, name, user)
         base = request.host_url.rstrip("/")
-        return jsonify({"id": device_id, "token": token, "pairing": DeviceStore.pairing_code(base, token)}), 201
+        pairing = DeviceStore.pairing_code(base, token)
+        # Drawn here so the token never goes to a third-party QR service.
+        qr_svg = segno.make(pairing, error="m").svg_inline(scale=6, border=2)
+        resp = jsonify({"id": device_id, "token": token, "pairing": pairing, "qr_svg": qr_svg})
+        resp.headers["Cache-Control"] = "no-store"
+        return resp, 201
 
     @bp.get("/api/v1/devices")
     def list_devices():

@@ -187,7 +187,7 @@ def test_admin_creates_lists_and_revokes_devices(app_ctx, db):
     r = c.post("/api/v1/devices", json={"name": "Pixel 8"})
     assert r.status_code == 201
     body = r.get_json()
-    assert set(body) == {"id", "token", "pairing"}
+    assert set(body) == {"id", "token", "pairing", "qr_svg"}
     assert body["pairing"] == DeviceStore.pairing_code("http://localhost", body["token"])
     assert DeviceStore(db).authenticate(body["token"])["name"] == "Pixel 8"
 

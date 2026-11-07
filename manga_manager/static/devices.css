@@ -1,0 +1,17 @@
+.dev-form { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 12px; margin-top: 12px; }
+.dev-form .field { margin: 0; flex: 1 1 220px; }
+.dev-msg { min-height: 1.5em; margin: 8px 0; font-size: .9375rem; color: var(--ink-soft); }
+.dev-msg.error { color: var(--warn); }
+.dev-msg.ok { color: var(--ok); font-weight: 700; }
+.dev-pair { margin: 12px 0 18px; padding: 14px; border: 1px dashed var(--warn); border-radius: 10px; }
+.dev-warn { margin: 0 0 12px; color: var(--warn); }
+.dev-pair-body { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.dev-pair-body .field { flex: 1 1 260px; min-width: 0; }
+.dev-pair-body input { width: 100%; font-family: ui-monospace, monospace; font-size: .75rem; box-sizing: border-box; }
+.dev-qr { background: #fff; padding: 8px; border-radius: 8px; line-height: 0; }
+.dev-qr svg { display: block; max-width: 100%; height: auto; }
+.dev-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 0; border-top: 1px solid var(--rule); }
+.dev-row .name { font-weight: 700; overflow-wrap: anywhere; flex: 1 1 160px; }
+.dev-row .meta { color: var(--ink-soft); font-size: .8125rem; }
+.dev-row.revoked { opacity: .55; }
+.dev-row.revoked .name { text-decoration: line-through; }
