@@ -9,7 +9,7 @@ import secrets
 
 
 def _hash(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return hashlib.sha256(token.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 class DeviceStore:
@@ -26,7 +26,7 @@ class DeviceStore:
         return row["id"], token
 
     def authenticate(self, token: str) -> dict | None:
-        if not token:
+        if not isinstance(token, str) or not token or len(token) > 512:
             return None
         digest = _hash(token)
         with self.db.connect() as c:
@@ -35,7 +35,8 @@ class DeviceStore:
                 "WHERE token_hash = %s AND revoked_at IS NULL", (digest,)).fetchone()
             if row is None or not hmac.compare_digest(row["token_hash"], digest):
                 return None
-            c.execute("UPDATE device_tokens SET last_seen = now() WHERE id = %s", (row["id"],))
+            c.execute("UPDATE device_tokens SET last_seen = now() WHERE id = %s AND revoked_at IS NULL",
+                (row["id"],))
         return {"id": row["id"], "name": row["name"], "user": row["user_name"]}
 
     def list(self) -> list[dict]:

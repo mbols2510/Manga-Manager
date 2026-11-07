@@ -1,6 +1,8 @@
 import base64
 import json
 
+import pytest
+
 from manga_manager.devices import DeviceStore
 
 
@@ -48,3 +50,10 @@ def test_pairing_code_round_trips():
     assert "=" not in body
     data = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
     assert data == {"v": 1, "url": "http://192.168.1.5:5000", "token": "tok_en"}
+
+
+@pytest.mark.parametrize("bad", [123, b"x", None, "", "\ud800", "a" * 10000])
+def test_authenticate_bad_input_returns_none(db, bad):
+    store = DeviceStore(db)
+    store.create("Pixel", "alice")
+    assert store.authenticate(bad) is None
