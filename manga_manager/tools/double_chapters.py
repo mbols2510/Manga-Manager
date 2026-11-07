@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from flask import Blueprint, Response, jsonify, render_template, request, session
+from flask import Blueprint, Response, g, has_request_context, jsonify, render_template, request, session
 
 from .. import __version__, notify
 from ..settings import WEEKDAYS, Setting, register
@@ -52,6 +52,14 @@ register(
 # Matches "official" but NOT "unofficial".
 _OFFICIAL_RE = re.compile(r"(?<!un)official", re.IGNORECASE)
 LOOSE_VOLUME_MARKERS = {"-100000", "-100000.0"}
+
+
+def _by_device() -> str:
+    """" (device: <name>)" when the current request came from an Android companion token, else ""."""
+    if not has_request_context():
+        return ""
+    device = g.get("device")
+    return f" (device: {device['name']})" if device else ""
 
 
 def now_iso() -> str:
@@ -481,7 +489,8 @@ class DoubleChapters:
             self.save("series", all_series)
             self.save("trash", trash)
         if moved:
-            self.db.log_activity("double_chapters", "trash", f"Trashed {len(moved)} file(s) from {series.get('name')}")
+            self.db.log_activity("double_chapters", "trash",
+                                 f"Trashed {len(moved)} file(s) from {series.get('name')}{_by_device()}")
         return {"moved": moved, "libraryId": series.get("libraryId")}
 
     def reconcile_read_status(self, series_id: int, chapters: list[dict]) -> None:
@@ -525,6 +534,9 @@ class DoubleChapters:
             shutil.move(entry["trashPath"], entry["originalPath"])
             del trash[trash_id]
             self.save("trash", trash)
+        if _by_device():
+            self.db.log_activity("double_chapters", "restore", f"Restored {os.path.basename(entry['originalPath'])} "
+                                 f"to {entry.get('seriesName')}{_by_device()}")
         try:
             self.client.scan_series(entry["seriesId"], entry.get("libraryId"))
         except Exception:  # noqa: BLE001

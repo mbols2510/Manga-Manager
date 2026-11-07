@@ -168,6 +168,37 @@ class LoginLimiter:
             for k in keys:
                 self._fails.pop(k, None)
 
+    def retry_after(self, key: str) -> int:
+        """Whole seconds until `key` drops below the limit again (0 when it is not blocked)."""
+        with self._lock:
+            q = self._prune(key)
+            if len(q) < self.attempts:
+                return 0
+            return max(1, int(q[-self.attempts] + self.window - self.clock() + 0.999))
+
+
+class TokenRateLimiter:
+    """At most `limit` requests per key (a device id) in any sliding `window` seconds."""
+
+    def __init__(self, limit: int = 120, window: int = 60, clock=time.monotonic):
+        self.limit = limit
+        self.window = window
+        self.clock = clock
+        self._hits: dict[object, deque] = defaultdict(deque)
+        self._lock = threading.Lock()
+
+    def hit(self, key) -> int:
+        """Records a request and returns 0, or returns the seconds to wait (the request is not recorded)."""
+        with self._lock:
+            now = self.clock()
+            q = self._hits[key]
+            while q and q[0] <= now - self.window:
+                q.popleft()
+            if len(q) >= self.limit:
+                return max(1, int(q[0] + self.window - now + 0.999))
+            q.append(now)
+            return 0
+
 
 def validate_signup(username: str, password: str, confirm: str) -> str | None:
     """Problem with a sign-up form, or None."""

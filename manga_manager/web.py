@@ -9,13 +9,14 @@ from datetime import timedelta
 from typing import Callable
 from urllib.parse import urlparse
 
-from flask import (Flask, abort, jsonify, redirect, render_template, request, send_file, session,
+from flask import (Flask, abort, g, jsonify, redirect, render_template, request, send_file, session,
                    url_for)
 
 from . import __version__
-from .auth import LoginLimiter, ThumbSigner, UserStore, load_secret_key, validate_signup
+from .auth import LoginLimiter, ThumbSigner, TokenRateLimiter, UserStore, load_secret_key, validate_signup
 from .config import Config
 from .covers import CoverStore
+from .devices import DeviceStore
 from .frames import FrameStore, slug
 from .history import History
 from .preferred import RANK_LABELS, detect_rank
@@ -27,8 +28,34 @@ log = logging.getLogger(__name__)
 # Settings hold the connection secrets and paths, so only an administrator (a config.yml account or the
 # first account) may open or change them.
 ADMIN_ENDPOINTS = {"core.settings_page", "core.settings_get", "core.settings_save", "core.settings_restart",
-                   "core.test_notification"}
+                   "core.test_notification",
+                   "v1_devices.create_device", "v1_devices.list_devices", "v1_devices.revoke_device"}
 PUBLIC_ENDPOINTS = {"login", "signup", "health", "core.health", "static"}
+
+# The only endpoints an Android companion device token (Authorization: Bearer) may reach. Deny by default:
+# every other route, including PUBLIC_ENDPOINTS, ADMIN_ENDPOINTS and routes added later, answers 403.
+DEVICE_ALLOWED_ENDPOINTS: frozenset[str] = frozenset({
+    "updates", "status", "run_now", "thumb", "core.health_detail",
+    "double_chapters.list_series", "double_chapters.series_detail", "double_chapters.cover",
+    "double_chapters.remediate", "double_chapters.kavita_scan", "double_chapters.trash",
+    "double_chapters.trash_restore", "double_chapters.status",
+    "v1.changes", "v1.latest",
+})
+DEVICE_REQUESTS_PER_MINUTE = 120
+# One body for every refusal of that kind, so a response never hints why a token was refused.
+BEARER_UNAUTHORIZED = {"error": "unauthorized"}
+BEARER_TOO_MANY = {"error": "too many requests"}
+DEVICE_FORBIDDEN = {"error": "this device cannot use this endpoint"}
+
+
+def _bearer_token(header: str | None) -> str | None:
+    """The token from an `Authorization: Bearer ...` header ("" when empty), or None for no/another scheme."""
+    if not header:
+        return None
+    parts = header.strip().split(None, 1)
+    if not parts or parts[0].casefold() != "bearer":
+        return None
+    return parts[1].strip() if len(parts) > 1 else ""
 
 
 ALIAS_MAX = 300           # longest title accepted for an alias (#12)
@@ -80,6 +107,8 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         ctx.extras["action_token"] = action_token
     users = UserStore(history.db, cfg.auth_users) if cfg.auth_enabled else None
     limiter = limiter or LoginLimiter()
+    devices = DeviceStore(history.db)
+    device_limiter = TokenRateLimiter(DEVICE_REQUESTS_PER_MINUTE, 60)
 
     def kavita_link(item: dict) -> str | None:
         if cfg.kavita_public_url and item.get("kavita_series_id") and item.get("kavita_library_id"):
@@ -132,14 +161,45 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         return request.remote_addr or "?"
 
     # ------------------------------------------------------------ access control
+    def bearer_guard(token: str):
+        """A request with `Authorization: Bearer`: a device principal, never an admin, allowlisted endpoints only.
+        Never logs or echoes the token or the header."""
+        ip_key = f"bearer:{client_ip()}"
+        if limiter.blocked(ip_key):
+            log.warning("Device-token request from %s refused: too many failed attempts", client_ip())
+            return jsonify(BEARER_TOO_MANY), 429, {"Retry-After": str(limiter.retry_after(ip_key))}
+        device = devices.authenticate(token) if token else None
+        if device is None:
+            limiter.fail(ip_key)
+            log.info("Rejected a device token from %s", client_ip())
+            return jsonify(BEARER_UNAUTHORIZED), 401, {"WWW-Authenticate": "Bearer"}
+        wait = device_limiter.hit(device["id"])
+        if wait:
+            log.warning("Device %d (%r) is over %d requests per minute", device["id"], device["name"],
+                        DEVICE_REQUESTS_PER_MINUTE)
+            return jsonify(BEARER_TOO_MANY), 429, {"Retry-After": str(wait)}
+        g.device = device
+        if request.endpoint not in DEVICE_ALLOWED_ENDPOINTS:
+            log.info("Device %d (%r) refused on %s %s", device["id"], device["name"], request.method,
+                     request.endpoint or "unknown route")
+            return jsonify(DEVICE_FORBIDDEN), 403
+        return None
+
     @app.before_request
     def guard():
+        g.device = None
         if request.method in ("POST", "PUT", "PATCH", "DELETE"):
             # Reject cross-site form posts (the session cookie is SameSite=Lax as well).
             origin = request.headers.get("Origin")
             if origin and origin != "null" and urlparse(origin).netloc != request.host:
                 abort(403)
-        if not cfg.auth_enabled or request.endpoint in PUBLIC_ENDPOINTS:
+        if not cfg.auth_enabled:
+            return None
+        token = _bearer_token(request.headers.get("Authorization"))
+        if token is not None:
+            # A bearer header always wins over a session cookie, so a cookie can never widen a device's access.
+            return bearer_guard(token)
+        if request.endpoint in PUBLIC_ENDPOINTS:
             return None
         if request.endpoint == "thumb" and signer.verify(request.view_args.get("manga_id", -1),
                                                          request.args.get("s")):
@@ -413,6 +473,9 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         @app.get("/health")
         def health():
             return {"status": "ok", "version": __version__}
+
+    from .v1_devices_routes import build_blueprint as build_devices_blueprint
+    app.register_blueprint(build_devices_blueprint(cfg, devices))
 
     app.context_processor(lambda: {"has_endpoint": lambda name: name in app.view_functions})
     if ctx is not None:
