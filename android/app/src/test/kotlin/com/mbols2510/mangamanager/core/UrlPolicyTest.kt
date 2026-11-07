@@ -58,6 +58,42 @@ class UrlPolicyTest {
     }
 
     @Test
+    fun trailing_dot_hosts_are_public_because_they_resolve_via_dns() {
+        rejected("http://192.168.1.1.")
+        rejected("http://192.168.1.1%2e")
+        rejected("http://localhost.")
+        rejected("http://nas.local.")
+        rejected("http://[fd00::1].")
+        ok("https://192.168.1.1.")
+        ok("https://nas.local.")
+    }
+
+    @Test
+    fun dot_local_requires_a_label() {
+        rejected("http://.local")
+        rejected("http://a..local")
+    }
+
+    @Test
+    fun authority_confusion_and_special_addresses_regressions() {
+        listOf(
+            "http://0.0.0.0",
+            "http://[::]",
+            "http://[64:ff9b::808:808]",
+            "http://[2002:808:808::]",
+            "http://192.168.1.1@evil.com",
+            "http://evil.com#@192.168.1.1",
+            "http://evil.com\\@192.168.1.1",
+        ).forEach { rejected(it) }
+    }
+
+    @Test
+    fun percent_encoded_ip_octets_are_canonicalized_by_okhttp() {
+        val r = UrlPolicy.check("http://%31%39%32.168.1.1") as UrlCheck.Ok
+        assertEquals("192.168.1.1", r.normalized.host)
+    }
+
+    @Test
     fun rejected_urls() {
         listOf(
             "http://example.com",
@@ -127,7 +163,7 @@ class UrlPolicyTest {
     @Test
     fun isPrivateHost_table() {
         val priv = listOf(
-            "localhost", "LOCALHOST", "nas.local", "a.b.local", "nas.local.",
+            "localhost", "LOCALHOST", "nas.local", "a.b.local",
             "127.0.0.1", "127.255.255.254", "10.1.2.3", "172.16.0.0", "172.31.255.255",
             "192.168.0.1", "169.254.1.1", "100.64.0.0", "100.127.255.255",
             "::1", "[::1]", "fd00::1", "fc00::", "fdff:ffff::1", "fe80::1", "febf::1",
@@ -137,7 +173,7 @@ class UrlPolicyTest {
             "example.com", "8.8.8.8", "100.63.255.255", "100.128.0.1", "172.15.0.1",
             "172.32.0.1", "192.167.0.1", "11.0.0.1", "169.253.0.1", "2001:db8::1",
             "fec0::1", "::ffff:8.8.8.8", "::", "", "local", "foo.localhost",
-            "999.1.1.1", "1.2.3", "1.2.3.4.5", "fe80::1%eth0",
+            ".local", "a..local", "..local", "nas.local.", "localhost.", "192.168.1.1.", "10.0.0.1.", "999.1.1.1", "1.2.3", "1.2.3.4.5", "fe80::1%eth0",
         )
         priv.forEach { assertTrue("private: $it", UrlPolicy.isPrivateHost(it)) }
         pub.forEach { assertFalse("public: $it", UrlPolicy.isPrivateHost(it)) }

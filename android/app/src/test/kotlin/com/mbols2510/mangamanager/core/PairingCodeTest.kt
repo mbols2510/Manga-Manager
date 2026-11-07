@@ -2,7 +2,9 @@ package com.mbols2510.mangamanager.core
 
 import java.util.Base64
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PairingCodeTest {
@@ -80,5 +82,27 @@ class PairingCodeTest {
             "mm1." + Base64.getUrlEncoder().encodeToString(byteArrayOf(0xff.toByte(), 0xfe.toByte(), 0x00)),
         )
         for (b in bad) assertNull("should be null: '$b'", PairingCode.parse(b))
+    }
+
+    @Test
+    fun toString_and_interpolation_do_not_leak_the_token() {
+        val p = Pairing("https://example.com", "SuperSecretToken123")
+        assertFalse(p.toString().contains("SuperSecretToken123"))
+        assertFalse("$p".contains("SuperSecretToken123"))
+        assertTrue(p.toString().contains("https://example.com"))
+        assertEquals(p, p.copy())
+        assertEquals(p.hashCode(), p.copy().hashCode())
+    }
+
+    @Test
+    fun input_size_is_capped() {
+        assertNull(PairingCode.parse("mm1." + "A".repeat(5_000_000)))
+        assertNull(PairingCode.parse("mm1." + "A".repeat(4093)))
+        val big = code("""{"v":1,"url":"https://e.com","token":"${"x".repeat(2500)}"}""")
+        assertEquals(true, big.length in 3500..4096)
+        assertEquals("x".repeat(2500), PairingCode.parse(big)?.token)
+        val tooBig = code("""{"v":1,"url":"https://e.com","token":"${"x".repeat(3100)}"}""")
+        assertEquals(true, tooBig.length > 4096)
+        assertNull(PairingCode.parse(tooBig))
     }
 }
