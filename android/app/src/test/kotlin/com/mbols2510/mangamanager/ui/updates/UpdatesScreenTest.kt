@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -19,7 +20,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipeDown
 import com.mbols2510.mangamanager.R
 import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
 import com.mbols2510.mangamanager.data.repo.AuthState
@@ -76,7 +76,17 @@ class UpdatesScreenTest {
         rule.waitUntil(5_000) { repo.refreshes == 1 && !vm.state.value.refreshing }
         waitForText("First")
 
-        rule.onNodeWithTag(UpdatesTestTags.LIST).performTouchInput { swipeDown() }
+        // A slow, long pull from the top of the list (a quick swipe may end as a fling before the threshold).
+        rule.onNodeWithTag(UpdatesTestTags.LIST).performTouchInput {
+            down(Offset(left + width / 4f, top + 2f)) // beside the (hidden) indicator
+            val step = (height - 10f) / 30f
+            repeat(30) {
+                advanceEventTime(30)
+                moveBy(Offset(0f, step))
+            }
+            advanceEventTime(300) // hold still: no fling velocity on release
+            up()
+        }
 
         rule.waitUntil(5_000) { repo.refreshes == 2 }
         rule.waitUntil(5_000) { !vm.state.value.refreshing }
