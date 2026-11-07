@@ -4,7 +4,13 @@ import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.foundation.layout.Box
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.unit.Velocity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -75,7 +81,26 @@ class UpdatesScreenTest {
     @Config(qualifiers = "w411dp-h891dp") // a phone-sized screen, so the list is tall enough to pull
     fun pull_to_refresh_forces_refresh() {
         val repo = FakeFeedRepository(listOf(feedItem(2, title = "Second"), feedItem(1, title = "First")))
-        val vm = show(repo)
+        val vm = UpdatesViewModel(repo, { null })
+        // Records what the pull-to-refresh container leaves unconsumed (diagnostics for the assertion message).
+        val seen = mutableListOf<String>()
+        val outer = object : NestedScrollConnection {
+            override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                seen += "pre(${available.y.toInt()},$source)"
+                return Offset.Zero
+            }
+
+            override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
+                seen += "post(${consumed.y.toInt()},${available.y.toInt()})"
+                return Offset.Zero
+            }
+
+            override suspend fun onPreFling(available: Velocity): Velocity {
+                seen += "fling(${available.y.toInt()})"
+                return Velocity.Zero
+            }
+        }
+        rule.setContent { MaterialTheme { Box(Modifier.nestedScroll(outer)) { UpdatesScreen(viewModel = vm) } } }
         rule.waitUntil(5_000) { repo.refreshes == 1 && !vm.state.value.refreshing }
         waitForText("First")
         // Let the indicator's hide animation (started when the first refresh ended) finish: while it runs, the
@@ -95,7 +120,8 @@ class UpdatesScreenTest {
             up()
         }
 
-        rule.waitUntil(5_000) { repo.refreshes == 2 }
+        rule.waitForIdle()
+        assertEquals("refreshes after the pull; nested scroll seen above the container: ${seen.take(12)} … ${seen.takeLast(4)} (${seen.size})", 2, repo.refreshes)
         rule.waitUntil(5_000) { !vm.state.value.refreshing }
     }
 
