@@ -36,12 +36,31 @@ sealed interface CheckResult {
     data object Offline : CheckResult
 }
 
+/** Outcome of the foreground feed refresh ([UpdatesRepository.refreshFeed]). */
+sealed interface FeedRefreshResult {
+    /** The change feed was checked and the newest browse page stored. */
+    data object Ok : FeedRefreshResult
+
+    /** The server answered 401: [AuthState.needsRepair] is now true. */
+    data object Unauthorized : FeedRefreshResult
+
+    /** Network failure, timeout, unexpected status or unreadable answer. The cache keeps what it had. */
+    data object Offline : FeedRefreshResult
+}
+
 interface UpdatesRepository {
     /** The cached feed, newest first. */
     val feed: Flow<List<UpdateEntity>>
 
     /** Background/foreground check (spec 5.1, 5.3). Never throws except for coroutine cancellation. */
     suspend fun checkForChanges(): CheckResult
+
+    /**
+     * Foreground refresh of the Updates screen (spec 5.2): one [checkForChanges] (so a revoked token is noticed and
+     * new items arrive), then the newest browse page (`GET api/updates?limit=60`) stored as already notified, without
+     * touching the sync cursor or ETag. Serialized with [checkForChanges]. Never throws except for cancellation.
+     */
+    suspend fun refreshFeed(): FeedRefreshResult
 
     /**
      * Stores `/api/v1/changes/latest` as the cursor (clears the ETag, stores no items). Used after pairing and
@@ -87,6 +106,8 @@ class DefaultUpdatesRepository internal constructor(
     private val checkLock = Mutex()
 
     override suspend fun checkForChanges(): CheckResult = checkLock.withLock { checkOnce() }
+
+    override suspend fun refreshFeed(): FeedRefreshResult = FeedRefreshResult.Offline
 
     private suspend fun checkOnce(): CheckResult {
         return try {
@@ -228,6 +249,9 @@ class DefaultUpdatesRepository internal constructor(
 
         /** Defensive cap: 200 pages of 50 is 10,000 updates in one check. */
         const val MAX_PAGES = 200
+
+        /** Size of the browse page the foreground refresh stores (the server's default page). */
+        const val BROWSE_LIMIT = 60
     }
 }
 

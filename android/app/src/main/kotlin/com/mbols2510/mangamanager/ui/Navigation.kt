@@ -61,6 +61,7 @@ fun startRoute(isPaired: Boolean, needsRepair: Boolean): String =
 /**
  * The app's navigation shell. [pairingScreen] receives the callback to run after a successful pairing.
  * Whenever [needsRepair] becomes true (a 401 anywhere), the back stack is replaced by the pairing route.
+ * [updatesScreen] is the content of the Updates destination (a placeholder when not given).
  */
 @Composable
 fun AppNavHost(
@@ -68,6 +69,7 @@ fun AppNavHost(
     needsRepair: StateFlow<Boolean>,
     pairingScreen: @Composable (onPaired: () -> Unit) -> Unit,
     modifier: Modifier = Modifier,
+    updatesScreen: @Composable () -> Unit = { ComingSoon(R.string.nav_updates) },
     navController: NavHostController = rememberNavController(),
 ) {
     val repair by needsRepair.collectAsStateWithLifecycle()
@@ -101,7 +103,7 @@ fun AppNavHost(
                     }
                 }
             }
-            composable(Routes.UPDATES) { ComingSoon(R.string.nav_updates) }
+            composable(Routes.UPDATES) { updatesScreen() }
             composable(Routes.DOUBLES) { ComingSoon(R.string.nav_doubles) }
             composable(Routes.JOBS) { ComingSoon(R.string.nav_jobs) }
             composable(Routes.SETTINGS) { ComingSoon(R.string.nav_settings) }

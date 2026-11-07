@@ -18,6 +18,12 @@ interface UpdatesCache {
     /** Sets `notified` for these ids: the notification decision for them is taken. */
     suspend fun markNotified(ids: Collection<Long>)
 
+    /**
+     * Upserts rows of the browse endpoint with `notified = true` (they are shown in the app, so they never notify).
+     * Never touches the sync state.
+     */
+    suspend fun storeBrowsed(items: List<UpdateEntity>)
+
     /** Stored items whose notification decision is not taken yet (`notified == false`), oldest first. */
     suspend fun pendingNotifications(): List<UpdateEntity>
 }
@@ -55,6 +61,8 @@ class RoomUpdatesCache internal constructor(
             ids.distinct().chunked(MAX_IDS_PER_QUERY).forEach { dao.markNotified(it) }
         }
     }
+
+    override suspend fun storeBrowsed(items: List<UpdateEntity>) = Unit
 
     override suspend fun pendingNotifications(): List<UpdateEntity> = dao.pendingNotifications()
 

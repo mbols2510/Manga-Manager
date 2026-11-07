@@ -23,6 +23,8 @@ import com.mbols2510.mangamanager.data.CachingSettingsStore
 import com.mbols2510.mangamanager.data.repo.AuthState
 import com.mbols2510.mangamanager.ui.pairing.PairingScreen
 import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
+import com.mbols2510.mangamanager.ui.updates.UpdatesScreen
+import com.mbols2510.mangamanager.ui.updates.UpdatesViewModel
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,6 +71,8 @@ fun App(appViewModel: AppViewModel, viewModelFactory: ViewModelProvider.Factory)
                 pairingScreen = { onPaired ->
                     PairingScreen(viewModel = viewModel<PairingViewModel>(factory = viewModelFactory), onPaired = onPaired)
                 },
+                // Scoped to the Updates back-stack entry: a re-pair pops it, so the next open starts a fresh screen.
+                updatesScreen = { UpdatesScreen(viewModel = viewModel<UpdatesViewModel>(factory = viewModelFactory)) },
             )
         }
     }

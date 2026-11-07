@@ -18,6 +18,7 @@ import com.mbols2510.mangamanager.data.api.UpdateDto
 import com.mbols2510.mangamanager.data.api.UpdatesPageDto
 import com.mbols2510.mangamanager.data.db.UpdateEntity
 import com.mbols2510.mangamanager.data.repo.CheckResult
+import com.mbols2510.mangamanager.data.repo.FeedRefreshResult
 import com.mbols2510.mangamanager.data.repo.UpdatesRepository
 import com.mbols2510.mangamanager.notify.Notifier
 import kotlinx.coroutines.flow.Flow
@@ -68,6 +69,8 @@ class FakeUpdatesRepository(var next: CheckResult = CheckResult.NoChange) : Upda
     }
 
     override suspend fun baseline() = error("the worker never takes a baseline")
+
+    override suspend fun refreshFeed(): FeedRefreshResult = error("the worker never refreshes the foreground feed")
 
     override suspend fun markNotified(ids: Collection<Long>) {
         marked += ids

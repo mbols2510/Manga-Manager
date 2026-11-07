@@ -34,5 +34,5 @@ fun UpdateDto.toEntity(): UpdateEntity = UpdateEntity(
     createdAt = createdAt.orEmpty(),
     thumbnail = thumbnail,
     kavitaUrl = kavitaUrl,
-    sensitive = sensitive,
+    sensitive = sensitive ?: false,
 )

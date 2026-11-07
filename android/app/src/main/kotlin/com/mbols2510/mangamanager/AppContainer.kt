@@ -24,6 +24,7 @@ import com.mbols2510.mangamanager.notify.LocalNotifier
 import com.mbols2510.mangamanager.notify.Notifier
 import com.mbols2510.mangamanager.ui.AppViewModel
 import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
+import com.mbols2510.mangamanager.ui.updates.UpdatesViewModel
 import com.mbols2510.mangamanager.work.CheckWorker
 import com.mbols2510.mangamanager.work.DeviceClock
 import com.mbols2510.mangamanager.work.Scheduler
@@ -84,6 +85,15 @@ class AppContainer internal constructor(
         if (base != null && token != null) credentials.publishIfUntouched(base, token)
         // AuthState lives in memory; a 401 seen by an earlier process (the worker) is persisted in the settings.
         if (settingsStore.needsRepair()) authState.markUnauthorized()
+    }
+
+    /**
+     * [warmUp] only while the in-memory pairing caches are still cold (a foreground refresh started before the
+     * start-up warm-up finished), so an open screen never pays for a second Keystore read. Runs on IO.
+     */
+    suspend fun warmUpIfCold() {
+        if (tokenStore.isLoaded && settingsStore.isLoaded) return
+        withContext(Dispatchers.IO) { warmUp() }
     }
 
     /**
@@ -153,5 +163,6 @@ class AppContainer internal constructor(
                 afterPaired = ::scheduleAfterPairing,
             )
         }
+        initializer { UpdatesViewModel(updatesRepository, credentials::get, ensureReady = ::warmUpIfCold) }
     }
 }

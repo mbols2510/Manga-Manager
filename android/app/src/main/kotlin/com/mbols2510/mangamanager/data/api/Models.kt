@@ -21,7 +21,10 @@ import kotlinx.serialization.json.contentOrNull
 
 // ---------------------------------------------------------------- change feed (v1_changes_routes.py)
 
-/** One row of `/api/v1/changes` (and of `/api/updates`, which has no `sensitive` flag and extra columns). */
+/**
+ * One row of `/api/v1/changes` and of `/api/updates` (which has extra columns). [sensitive] is null when the server
+ * did not send the flag (a server older than the browse flag); the cache then treats the item as sensitive.
+ */
 @Serializable
 data class UpdateDto(
     val id: Long,
@@ -32,7 +35,7 @@ data class UpdateDto(
     @SerialName("created_at") val createdAt: String? = null,
     val thumbnail: String? = null,
     @SerialName("kavita_url") val kavitaUrl: String? = null,
-    val sensitive: Boolean = false,
+    val sensitive: Boolean? = null,
 )
 
 @Serializable

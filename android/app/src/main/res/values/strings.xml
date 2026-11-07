@@ -57,4 +57,26 @@
     </plurals>
     <string name="notification_repair_title">Re-pair this device</string>
     <string name="notification_repair_text">Your server no longer accepts this device. Open the app and pair it again to resume update checks.</string>
+
+    <!-- Updates feed (Task 10). Titles, categories and chapter names from the server are shown as plain text. -->
+    <string name="updates_search_label">Search titles</string>
+    <string name="updates_search_clear">Clear search</string>
+    <string name="updates_filter_kind">Show</string>
+    <string name="updates_kind_all">All</string>
+    <string name="updates_kind_new">New series</string>
+    <string name="updates_kind_updated">Updated</string>
+    <string name="updates_filter_category">Category</string>
+    <string name="updates_category_all">All categories</string>
+    <string name="updates_badge_new">New series</string>
+    <string name="updates_badge_updated">Updated</string>
+    <string name="updates_cover_sensitive">Hidden cover of a sensitive title</string>
+    <string name="updates_cover_none">No cover</string>
+    <string name="updates_empty_title">No updates yet</string>
+    <string name="updates_empty_text">New chapters appear here after your server\'s next run. Pull down to check now.</string>
+    <string name="updates_no_match">No updates match these filters.</string>
+    <string name="updates_offline_title">Can\'t reach the server</string>
+    <string name="updates_offline_text">Check that you are on the right network or VPN, then pull down to try again.</string>
+    <string name="updates_offline_banner">Could not reach the server. Showing saved updates.</string>
+    <string name="updates_open_failed">No app on this device can open this link.</string>
+    <string name="updates_open_in_kavita">Open in Kavita</string>
 </resources>

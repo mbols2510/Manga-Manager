@@ -611,4 +611,131 @@ class UpdatesRepositoryTest {
         assertEquals(listOf(1L, 2L, 3L), (next as CheckResult.NewItems).items.map { it.id })
         assertEquals(0L + 3L, db.updateDao().syncState()!!.cursor)
     }
+
+    // ---------------------------------------------------------------- foreground feed refresh (Task 10)
+
+    /** `GET /api/updates` (browse, newest first). [sensitiveField] false leaves the flag out, like an older server. */
+    private fun browse(ids: List<Long>, sensitive: (Long) -> Boolean = { false }, sensitiveField: Boolean = true) =
+        MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").setBody(
+            """{"items":[${ids.joinToString(",") { id ->
+                """{"id":$id,"title":"Browse $id","category":"Manga","is_new":false,"chapters":["c$id"],
+                   "created_at":"2026-10-0${1 + (id % 9)}T10:00:00+00:00","thumbnail":"thumb/$id.png",
+                   "kavita_url":null,"suwayomi_id":$id,"source":"x"""" +
+                    (if (sensitiveField) ""","sensitive":${sensitive(id)}""" else "") + "}"
+            }}],"total":${ids.size},"offset":0,"limit":60}""",
+        )
+
+    @Test
+    fun empty_cache_is_filled_from_browse_endpoint_without_moving_the_cursor() = runBlocking {
+        seed(50, "\"e50\"") // paired: cursor stored, nothing cached (pairing stores no items)
+        server.enqueue(MockResponse().setResponseCode(304).setHeader("ETag", "\"e50\""))
+        server.enqueue(browse(listOf(50, 49, 48)))
+        val repo = repo()
+
+        assertEquals(FeedRefreshResult.Ok, repo.refreshFeed())
+
+        assertEquals(listOf(50L, 49L, 48L), repo.feed.first().map { it.id }.sortedDescending())
+        assertEquals("cursor and ETag belong to checkForChanges", SyncState(50, "\"e50\"", 1L), db.updateDao().syncState())
+        assertEquals("/api/v1/changes?since=50&limit=50", take().path)
+        assertEquals("/api/updates?limit=60&offset=0", take().path)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun fresh_install_refresh_baselines_then_browses() = runBlocking {
+        server.enqueue(latest(9))
+        server.enqueue(browse(listOf(9, 8)))
+        assertEquals(FeedRefreshResult.Ok, repo().refreshFeed())
+        assertEquals(SyncState(9, null, now), db.updateDao().syncState())
+        assertEquals(listOf(8L, 9L), db.updateDao().allById().map { it.id })
+        assertEquals("/api/v1/changes/latest", take().path)
+        assertEquals("/api/updates?limit=60&offset=0", take().path)
+    }
+
+    @Test
+    fun browse_items_are_stored_as_notified() = runBlocking {
+        seed(3)
+        // The check stores 4 and 5 (not decided yet); the browse page then shows 5, 4, 2 to the user.
+        server.enqueue(page(listOf(4, 5), next = 5, more = false))
+        server.enqueue(browse(listOf(5, 4, 2)))
+        val repo = repo()
+
+        assertEquals(FeedRefreshResult.Ok, repo.refreshFeed())
+
+        assertEquals(listOf(2L, 4L, 5L), db.updateDao().allById().map { it.id })
+        assertTrue("browse rows never notify", repo.pendingNotifications().isEmpty())
+        assertEquals("the cursor still follows the change feed only", 5L, db.updateDao().syncState()!!.cursor)
+        // The worker's next check finds nothing new for them.
+        server.enqueue(page(emptyList(), next = 5, more = false, etag = null))
+        assertEquals(CheckResult.NoChange, repo.checkForChanges())
+        assertTrue(repo.pendingNotifications().isEmpty())
+    }
+
+    @Test
+    fun browse_sensitive_flag_is_kept_and_a_missing_flag_counts_as_sensitive() = runBlocking {
+        seed(10)
+        server.enqueue(page(emptyList(), next = 10, more = false, etag = null))
+        server.enqueue(browse(listOf(10, 9), sensitive = { it == 10L }))
+        repo().refreshFeed()
+        assertEquals(mapOf(9L to false, 10L to true), db.updateDao().allById().associate { it.id to it.sensitive })
+
+        // An older server without the field: fail closed (blurred) rather than show a mature cover.
+        server.enqueue(page(emptyList(), next = 10, more = false, etag = null))
+        server.enqueue(browse(listOf(8), sensitiveField = false))
+        repo().refreshFeed()
+        assertTrue(db.updateDao().allById().single { it.id == 8L }.sensitive)
+    }
+
+    @Test
+    fun refresh_feed_401_on_the_check_marks_repair_and_skips_the_browse() = runBlocking {
+        seed(3)
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"unauthorized"}"""))
+        assertEquals(FeedRefreshResult.Unauthorized, repo().refreshFeed())
+        assertTrue(auth.needsRepair.value)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun refresh_feed_401_on_the_browse_marks_repair() = runBlocking {
+        seed(3)
+        server.enqueue(page(emptyList(), next = 3, more = false, etag = null))
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"unauthorized"}"""))
+        assertEquals(FeedRefreshResult.Unauthorized, repo().refreshFeed())
+        assertTrue(auth.needsRepair.value)
+    }
+
+    @Test
+    fun refresh_feed_offline_or_server_error_keeps_the_cache_and_never_throws() = runBlocking {
+        seed(3, "\"e3\"", 3)
+        server.enqueue(page(emptyList(), next = 3, more = false, etag = null))
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertEquals(FeedRefreshResult.Offline, repo().refreshFeed())
+        server.enqueue(page(emptyList(), next = 3, more = false, etag = null))
+        server.enqueue(MockResponse().setResponseCode(200).setBody("not json"))
+        assertEquals(FeedRefreshResult.Offline, repo().refreshFeed())
+
+        val api = api()
+        server.shutdown()
+        assertEquals(FeedRefreshResult.Offline, repo(api = api).refreshFeed())
+        assertEquals(listOf(3L), db.updateDao().allById().map { it.id })
+        assertEquals(3L, db.updateDao().syncState()!!.cursor)
+        assertFalse(auth.needsRepair.value)
+    }
+
+    @Test
+    fun refresh_feed_waits_for_a_running_check() = runBlocking {
+        seed(0)
+        val gate = CompletableDeferred<Unit>()
+        val api = object : MangaApi by GatedApi(gate) {
+            override suspend fun updates(limit: Int, offset: Int, query: String?, category: String?, kind: String?) =
+                UpdatesPageDto(emptyList())
+        }
+        val repo = DefaultUpdatesRepository({ api }, RoomUpdatesCache(db), auth, { now })
+        val check = async { repo.checkForChanges() }
+        val refresh = async { repo.refreshFeed() }
+        gate.complete(Unit)
+        assertTrue(withTimeout(5_000) { check.await() } is CheckResult.NewItems)
+        assertEquals(FeedRefreshResult.Ok, withTimeout(5_000) { refresh.await() })
+        assertEquals(3L, db.updateDao().syncState()!!.cursor)
+    }
 }

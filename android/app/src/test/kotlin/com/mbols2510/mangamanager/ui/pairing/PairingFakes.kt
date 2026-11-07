@@ -4,6 +4,7 @@ import com.mbols2510.mangamanager.core.TokenStore
 import com.mbols2510.mangamanager.data.api.LatestDto
 import com.mbols2510.mangamanager.data.db.UpdateEntity
 import com.mbols2510.mangamanager.data.repo.CheckResult
+import com.mbols2510.mangamanager.data.repo.FeedRefreshResult
 import com.mbols2510.mangamanager.data.repo.UpdatesRepository
 import java.util.Base64
 import kotlinx.coroutines.flow.Flow
@@ -47,6 +48,8 @@ class FakeUpdatesRepository(private val onBaseline: suspend () -> Unit = {}) : U
     override val feed: Flow<List<UpdateEntity>> = emptyFlow()
 
     override suspend fun checkForChanges(): CheckResult = CheckResult.NoChange
+
+    override suspend fun refreshFeed(): FeedRefreshResult = FeedRefreshResult.Ok
 
     override suspend fun baseline() {
         baselines++
