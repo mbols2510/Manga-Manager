@@ -114,7 +114,14 @@ class CheckWorker(
         if (items.isEmpty()) return
         // Posting and marking belong together: a stop in between would only re-post once (same tag, no re-alert).
         withContext(NonCancellable) {
-            if (!inQuietHours) deps.notifier.notifyUpdates(items) // false = unavailable: decided as well
+            if (!inQuietHours) {
+                // false (unavailable) is a decision as well; an unexpected failure must not loop every period.
+                try {
+                    deps.notifier.notifyUpdates(items)
+                } catch (_: RuntimeException) {
+                    false
+                }
+            }
             deps.repository.markNotified(items.map { it.id })
         }
     }

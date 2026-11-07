@@ -70,6 +70,20 @@ class MergedManifestCheckerTest {
     }
 
     @Test
+    fun rejects_default_workmanager_initializer() {
+        val withInitializer = launcher + guardedLibraryComponents.replace(
+            "android:authorities=\"$appId.androidx-startup\" android:exported=\"false\" />",
+            "android:authorities=\"$appId.androidx-startup\" android:exported=\"false\">" +
+                "<meta-data android:name=\"androidx.work.WorkManagerInitializer\" android:value=\"androidx.startup\" />" +
+                "<meta-data android:name=\"androidx.profileinstaller.ProfileInstallerInitializer\" android:value=\"androidx.startup\" />" +
+                "</provider>",
+        )
+        assertTrue("fixture must contain the initializer", withInitializer.contains("WorkManagerInitializer"))
+        assertRejected(manifest(components = withInitializer), "forbidden startup initializer present: androidx.work.WorkManagerInitializer")
+        assertEquals(1, violations(manifest(components = withInitializer)).size)
+    }
+
+    @Test
     fun accepts_explicit_non_debuggable_application() {
         assertEquals(emptyList<String>(), violations(manifest(applicationAttrs = """android:debuggable="false"""")))
     }

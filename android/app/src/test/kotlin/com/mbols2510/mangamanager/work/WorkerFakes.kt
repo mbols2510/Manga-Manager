@@ -33,8 +33,12 @@ class FakeNotifier(var available: Boolean = true) : Notifier {
 
     override fun canNotify(): Boolean = available
 
+    /** Simulates an unexpected platform failure while posting. */
+    var failure: RuntimeException? = null
+
     override fun notifyUpdates(items: List<UpdateEntity>): Boolean {
         updateCalls += items
+        failure?.let { throw it }
         return available && items.isNotEmpty()
     }
 

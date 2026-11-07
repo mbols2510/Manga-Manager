@@ -313,6 +313,14 @@ class CheckWorkerTest {
     }
 
     @Test
+    fun a_failing_notifier_never_crashes_the_run_or_loops_on_the_same_items() {
+        notifier.failure = IllegalStateException("platform failure")
+        val repo = FakeUpdatesRepository(CheckResult.NewItems(listOf(update(1))))
+        assertEquals(ListenableWorker.Result.success(), run(repo))
+        assertEquals(listOf(1L), repo.marked)
+    }
+
+    @Test
     fun cancelled_run_records_no_successful_check() {
         val repo = FakeUpdatesRepository(CheckResult.NewItems(listOf(update(1))))
         // The run is stopped while the request is in flight; OkHttp then reports an ordinary result.

@@ -34,6 +34,13 @@ object MergedManifestChecker {
         "androidx.work.impl.foreground.SystemForegroundService",
     )
 
+    /**
+     * Startup initializers that must be removed: WorkManager is initialized on demand from `MangaApp`
+     * (Configuration.Provider with the CheckWorker factory); if App Startup also initialized it, the factory
+     * would be ignored and the worker could not be created.
+     */
+    val FORBIDDEN_INITIALIZERS = setOf("androidx.work.WorkManagerInitializer")
+
     fun allowedPermissions(applicationId: String): Set<String> = setOf(
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
@@ -68,6 +75,12 @@ object MergedManifestChecker {
         if (debuggable != null && debuggable != "false") {
             problems += "application is debuggable (android:debuggable=\"$debuggable\")"
         }
+
+        // (f) initializers that would bypass the app's own WorkManager configuration.
+        application.elements("meta-data")
+            .map { it.androidAttr("name").orEmpty() }
+            .filter { it in FORBIDDEN_INITIALIZERS }
+            .forEach { problems += "forbidden startup initializer present: $it" }
 
         val components = COMPONENT_TAGS.flatMap { tag -> application.elements(tag).map { tag to it } }
         for ((tag, component) in components) {
