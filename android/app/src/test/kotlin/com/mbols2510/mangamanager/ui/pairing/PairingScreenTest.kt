@@ -18,6 +18,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.test.core.app.ApplicationProvider
 import com.mbols2510.mangamanager.R
 import com.mbols2510.mangamanager.data.FakeSettingsStore
+import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
 import com.mbols2510.mangamanager.data.repo.AuthState
 import kotlinx.coroutines.Dispatchers
 import org.junit.Assert.assertEquals
@@ -41,7 +42,8 @@ class PairingScreenTest {
 
     private fun show() {
         val vm = PairingViewModel(
-            tokens, FakeSettingsStore(), AuthState(), FakeUpdatesRepository(), server, Dispatchers.Unconfined,
+            tokens, FakeSettingsStore(), AuthState(), FakeUpdatesRepository(), PairedCredentialsHolder(), server,
+            Dispatchers.Unconfined,
         )
         rule.setContent { MaterialTheme { PairingScreen(viewModel = vm, onPaired = {}) } }
     }

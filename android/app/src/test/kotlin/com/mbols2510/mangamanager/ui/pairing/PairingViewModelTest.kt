@@ -2,7 +2,13 @@ package com.mbols2510.mangamanager.ui.pairing
 
 import androidx.lifecycle.viewModelScope
 import com.mbols2510.mangamanager.R
+import com.mbols2510.mangamanager.data.SettingsStore
+import com.mbols2510.mangamanager.core.TokenStore
 import com.mbols2510.mangamanager.data.api.LatestDto
+import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import okhttp3.HttpUrl
 import com.mbols2510.mangamanager.data.FakeSettingsStore
 import com.mbols2510.mangamanager.data.repo.AuthState
 import java.io.IOException
@@ -57,7 +63,7 @@ class PairingViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun viewModel() = PairingViewModel(tokens, settings, auth, repo, server, dispatcher).also { vmRef = it }
+    private fun viewModel() = PairingViewModel(tokens, settings, auth, repo, PairedCredentialsHolder(), server, dispatcher).also { vmRef = it }
 
     /** Records every state the ViewModel emits. */
     private fun TestScope.recorded(vm: PairingViewModel): MutableList<PairingUiState> {
@@ -202,7 +208,7 @@ class PairingViewModelTest {
             baselineStarted.complete(Unit)
             gate.await()
         }
-        val vm = PairingViewModel(tokens, settings, auth, suspendedRepo, server, dispatcher)
+        val vm = PairingViewModel(tokens, settings, auth, suspendedRepo, PairedCredentialsHolder(), server, dispatcher)
 
         vm.submit(pairingCode("https://manga.example.com", TOKEN))
 
@@ -220,6 +226,64 @@ class PairingViewModelTest {
     }
 
     @Test
+    fun holder_is_published_only_after_both_writes_and_cleared_first_on_rollback() = runTest(dispatcher) {
+        val log = mutableListOf<String>()
+        lateinit var holder: PairedCredentialsHolder
+        fun held() = if (holder.get() == null) "null" else "set"
+        holder = object : PairedCredentialsHolder() {
+            override fun set(base: HttpUrl, token: String) {
+                log += "holder.set"
+                super.set(base, token)
+            }
+
+            override fun clear() {
+                log += "holder.clear"
+                super.clear()
+            }
+        }
+        val store = object : TokenStore {
+            override fun save(token: String) { log += "token.save[holder=${held()}]" }
+            override fun load(): String? = null
+            override fun clear() { log += "token.clear[holder=${held()}]" }
+        }
+        val urlState = MutableStateFlow<String?>(null)
+        val urls = object : SettingsStore {
+            override val serverUrl: Flow<String?> = urlState
+            override suspend fun serverUrl(): String? = urlState.value
+            override suspend fun setServerUrl(url: String?) {
+                log += (if (url == null) "url.clear" else "url.set") + "[holder=${held()}]"
+            }
+            override suspend fun clearAll() = Unit
+        }
+        var failBaseline = false
+        val repository = FakeUpdatesRepository {
+            log += "baseline[holder=${held()}]"
+            if (failBaseline) throw IOException("offline")
+        }
+        val code = pairingCode("https://manga.example.com", TOKEN)
+
+        PairingViewModel(store, urls, auth, repository, holder, server, dispatcher).submit(code)
+        assertEquals(
+            listOf("holder.clear", "token.save[holder=null]", "url.set[holder=null]", "holder.set", "baseline[holder=set]"),
+            log,
+        )
+        assertEquals("https://manga.example.com/", holder.get()!!.base.toString())
+        assertFalse("the redacted value never prints the token", holder.get().toString().contains(TOKEN))
+
+        log.clear()
+        failBaseline = true
+        PairingViewModel(store, urls, auth, repository, holder, server, dispatcher).submit(code)
+        assertEquals(
+            listOf(
+                "holder.clear", "token.save[holder=null]", "url.set[holder=null]", "holder.set",
+                "baseline[holder=set]", "holder.clear", "token.clear[holder=null]", "url.clear[holder=null]",
+            ),
+            log,
+        )
+        assertNull(holder.get())
+    }
+
+    @Test
     fun second_submit_while_validating_is_ignored() = runTest(dispatcher) {
         val gate = CompletableDeferred<Unit>()
         val calls = mutableListOf<String?>()
@@ -229,7 +293,7 @@ class PairingViewModelTest {
             if (token == null) throw httpError(401)
             LatestDto(cursor = 1)
         }
-        val vm = PairingViewModel(tokens, settings, auth, repo, gated, dispatcher)
+        val vm = PairingViewModel(tokens, settings, auth, repo, PairedCredentialsHolder(), gated, dispatcher)
         val code = pairingCode("https://manga.example.com", TOKEN)
 
         vm.submit(code)

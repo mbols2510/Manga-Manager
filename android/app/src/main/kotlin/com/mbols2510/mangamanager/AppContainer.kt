@@ -11,6 +11,7 @@ import com.mbols2510.mangamanager.data.CachingSettingsStore
 import com.mbols2510.mangamanager.data.DataStoreSettingsStore
 import com.mbols2510.mangamanager.data.SettingsStore
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
+import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
 import com.mbols2510.mangamanager.data.db.AppDatabase
 import com.mbols2510.mangamanager.data.db.RoomUpdatesCache
 import com.mbols2510.mangamanager.data.repo.AuthState
@@ -44,6 +45,8 @@ class AppContainer internal constructor(
         CachingSettingsStore(settings ?: DataStoreSettingsStore(appContext))
     }
     val database: AppDatabase by lazy { AppDatabase.build(appContext) }
+
+    val credentials = PairedCredentialsHolder()
 
     private val baseUrl = PairedBaseUrl { settingsStore.cachedServerUrl }
 
@@ -87,6 +90,6 @@ class AppContainer internal constructor(
 
     val factory: ViewModelProvider.Factory = viewModelFactory {
         initializer { AppViewModel(tokenStore, settingsStore, authState) }
-        initializer { PairingViewModel(tokenStore, settingsStore, authState, updatesRepository) }
+        initializer { PairingViewModel(tokenStore, settingsStore, authState, updatesRepository, credentials) }
     }
 }

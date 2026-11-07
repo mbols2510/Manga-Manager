@@ -58,8 +58,12 @@ object MangaApiFactory {
      * and never rebuilt. Nothing is read to build it: [baseUrl] (null until paired) and [token] are read per
      * request and must be non-blocking memory reads. Requests are gated on the paired origin, see [PairedServerGate].
      */
-    fun sharedClient(baseUrl: () -> HttpUrl?, token: () -> String?, onUnauthorized: () -> Unit = {}): OkHttpClient =
+    fun sharedClient(baseUrl: () -> HttpUrl?, token: () -> String?, onUnauthorized: () -> Unit): OkHttpClient =
         newClient(baseUrl, token, onUnauthorized, MAX_BODY_BYTES, gated = true)
+
+    /** TDD stub: still reads base and token separately; the snapshot version arrives in the next commit. */
+    fun sharedClient(credentials: () -> PairedCredentials?, onUnauthorized: () -> Unit): OkHttpClient =
+        newClient({ credentials()?.base }, { credentials()?.token }, onUnauthorized, MAX_BODY_BYTES, gated = true)
 
     internal fun retrofit(baseUrl: HttpUrl, client: OkHttpClient): Retrofit = Retrofit.Builder()
         .baseUrl(baseUrl)

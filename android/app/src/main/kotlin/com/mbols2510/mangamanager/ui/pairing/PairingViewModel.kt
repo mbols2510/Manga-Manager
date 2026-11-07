@@ -11,6 +11,7 @@ import com.mbols2510.mangamanager.core.UrlPolicy
 import com.mbols2510.mangamanager.data.SettingsStore
 import com.mbols2510.mangamanager.data.api.LatestDto
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
+import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
 import com.mbols2510.mangamanager.data.repo.AuthState
 import com.mbols2510.mangamanager.data.repo.UpdatesRepository
 import kotlin.coroutines.cancellation.CancellationException
@@ -59,6 +60,7 @@ class PairingViewModel(
     private val settings: SettingsStore,
     private val authState: AuthState,
     private val repository: UpdatesRepository,
+    private val credentials: PairedCredentialsHolder,
     private val latestCall: LatestCall = FactoryLatestCall,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
