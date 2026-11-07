@@ -82,6 +82,12 @@ jobs:
           echo "::error::verification-metadata.xml was (re)generated, so this run did not verify dependencies. Commit the artifact and re-run."
           exit 1
 
+      - name: Show merged debug manifest permissions and exported components
+        run: |
+          m=$(find app/build/intermediates -path '*merged_manifest*debug*' -name AndroidManifest.xml | head -n 1)
+          echo "merged manifest: $m"
+          grep -nE 'uses-permission|android:exported="true"|android:permission=' "$m" || true
+
       - name: Upload debug APK
         uses: actions/upload-artifact@v7.0.2
         with:
