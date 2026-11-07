@@ -1,0 +1,390 @@
+package com.mbols2510.mangamanager.data.repo
+
+import android.content.Context
+import androidx.room.Room
+import androidx.test.core.app.ApplicationProvider
+import com.mbols2510.mangamanager.data.api.MangaApi
+import com.mbols2510.mangamanager.data.api.MangaApiFactory
+import com.mbols2510.mangamanager.data.db.AppDatabase
+import com.mbols2510.mangamanager.data.db.RoomUpdatesCache
+import com.mbols2510.mangamanager.data.db.SyncState
+import com.mbols2510.mangamanager.data.db.UpdateEntity
+import com.mbols2510.mangamanager.data.db.UpdatesCache
+import java.net.InetAddress
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
+import okhttp3.HttpUrl
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+/**
+ * Real stack: MockWebServer + the production OkHttp/Retrofit client + in-memory Room (Robolectric).
+ * The Robolectric SDK level comes from src/test/resources/robolectric.properties.
+ */
+@RunWith(RobolectricTestRunner::class)
+class UpdatesRepositoryTest {
+    private lateinit var server: MockWebServer
+    private lateinit var db: AppDatabase
+    private lateinit var auth: AuthState
+    private var now = 1_000L
+
+    @Before
+    fun setUp() {
+        server = MockWebServer().apply { start(InetAddress.getByName("127.0.0.1"), 0) }
+        db = Room.inMemoryDatabaseBuilder(ApplicationProvider.getApplicationContext<Context>(), AppDatabase::class.java)
+            .allowMainThreadQueries()
+            .build()
+        auth = AuthState()
+    }
+
+    @After
+    fun tearDown() {
+        db.close()
+        runCatching { server.shutdown() }
+    }
+
+    // ---------------------------------------------------------------- helpers
+
+    private val base: HttpUrl
+        get() = HttpUrl.Builder().scheme("http").host("127.0.0.1").port(server.port).encodedPath("/").build()
+
+    private fun api(maxBodyBytes: Long = MangaApiFactory.MAX_BODY_BYTES): MangaApi =
+        MangaApiFactory.createWith(base, { "tok" }, auth::markUnauthorized, maxBodyBytes = maxBodyBytes)
+
+    /** Counts every write that reaches the cache. */
+    private class CountingCache(private val d: UpdatesCache) : UpdatesCache by d {
+        var writes = 0
+        override suspend fun setSyncState(state: SyncState) { writes++; d.setSyncState(state) }
+        override suspend fun applyChanges(items: List<UpdateEntity>, state: SyncState): List<UpdateEntity> {
+            writes++
+            return d.applyChanges(items, state)
+        }
+        override suspend fun markNotified(ids: Collection<Long>) { writes++; d.markNotified(ids) }
+    }
+
+    private fun repo(
+        cache: UpdatesCache = RoomUpdatesCache(db),
+        api: MangaApi? = api(),
+        maxPages: Int = DefaultUpdatesRepository.MAX_PAGES,
+    ) = DefaultUpdatesRepository({ api }, cache, auth, { now }, DefaultUpdatesRepository.PAGE_SIZE, maxPages)
+
+    private fun item(id: Long, title: String = "Title $id", chapters: String = """["Ch. $id"]""", extra: String = "") =
+        """{"id":$id,"title":${q(title)},"category":"Manga","is_new":${id % 2 == 0L},"chapters":$chapters,
+           "created_at":"2026-11-0${1 + (id % 9)}T10:00:00+00:00","thumbnail":"thumb/$id.png",
+           "kavita_url":"https://kavita.example/s/$id","sensitive":false$extra}"""
+
+    private fun q(s: String) = "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
+    private fun page(ids: List<Long>, next: Long, more: Boolean, etag: String? = "\"e$next\"") =
+        MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").apply {
+            if (etag != null) setHeader("ETag", etag)
+        }.setBody("""{"items":[${ids.joinToString(",") { item(it) }}],"next_cursor":$next,"has_more":$more}""")
+
+    private fun latest(cursor: Long) =
+        MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").setBody("""{"cursor":$cursor}""")
+
+    private fun seed(cursor: Long, etag: String? = null, vararg ids: Long) = runBlocking {
+        val cache = RoomUpdatesCache(db)
+        if (ids.isEmpty()) {
+            cache.setSyncState(SyncState(cursor, etag, 1L))
+        } else {
+            cache.applyChanges(ids.map { entity(it) }, SyncState(cursor, etag, 1L))
+        }
+    }
+
+    private fun entity(id: Long) = UpdateEntity(id, "Seed $id", "Manga", false, listOf("c$id"), "2026-10-01T00:00:00+00:00", null, null, false)
+
+    private suspend fun snapshot(): Pair<List<UpdateEntity>, SyncState?> = db.updateDao().allById() to db.updateDao().syncState()
+
+    private fun take(): RecordedRequest = server.takeRequest(5, TimeUnit.SECONDS)!!
+
+    // ---------------------------------------------------------------- brief tests
+
+    @Test
+    fun `304_makes_no_db_write_and_returns_NoChange`() = runBlocking {
+        seed(5, "\"etag-5\"", 4, 5)
+        val before = snapshot()
+        server.enqueue(MockResponse().setResponseCode(304).setHeader("ETag", "\"etag-5\""))
+        val counting = CountingCache(RoomUpdatesCache(db))
+
+        assertEquals(CheckResult.NoChange, repo(cache = counting).checkForChanges())
+
+        assertEquals("no write may reach the cache on 304", 0, counting.writes)
+        assertEquals("tables unchanged", before, snapshot())
+        val req = take()
+        assertEquals("/api/v1/changes?since=5&limit=50", req.path)
+        assertEquals("\"etag-5\"", req.getHeader("If-None-Match"))
+    }
+
+    @Test
+    fun `new_items_upserted_and_cursor_advanced_in_one_transaction`() = runBlocking {
+        seed(10, "\"old\"")
+        // 1) A failure injected between the upsert and the cursor write rolls everything back.
+        server.enqueue(page(listOf(11, 12), next = 12, more = false))
+        val failing = RoomUpdatesCache(db) { throw IllegalStateException("injected after upsert") }
+        assertEquals(CheckResult.Offline, repo(cache = failing).checkForChanges())
+        assertEquals(SyncState(10, "\"old\"", 1L), db.updateDao().syncState())
+        assertTrue("no item may persist", db.updateDao().allById().isEmpty())
+
+        // 2) The same answer without the failure: items stored, cursor and ETag advanced together.
+        server.enqueue(page(listOf(11, 12), next = 12, more = false, etag = "\"e12\""))
+        now = 5_000L
+        val result = repo().checkForChanges()
+        assertEquals(listOf(11L, 12L), (result as CheckResult.NewItems).items.map { it.id })
+        assertEquals(listOf(11L, 12L), db.updateDao().allById().map { it.id })
+        assertEquals(SyncState(12, "\"e12\"", 5_000L), db.updateDao().syncState())
+        assertEquals("\"old\"", take().getHeader("If-None-Match"))
+        assertEquals("\"old\"", take().getHeader("If-None-Match"))
+    }
+
+    @Test
+    fun `410_resets_baseline_without_returning_new_items`() = runBlocking {
+        seed(100, "\"e100\"", 99, 100)
+        server.enqueue(MockResponse().setResponseCode(410).setBody("""{"error":"cursor too old or reset"}"""))
+        server.enqueue(latest(7))
+        now = 9_000L
+
+        assertEquals(CheckResult.NoChange, repo().checkForChanges())
+
+        assertEquals(SyncState(7, null, 9_000L), db.updateDao().syncState())
+        assertEquals("cached items are kept, none added", listOf(99L, 100L), db.updateDao().allById().map { it.id })
+        assertEquals("/api/v1/changes?since=100&limit=50", take().path)
+        assertEquals("/api/v1/changes/latest", take().path)
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `401_sets_needsRepair_and_returns_Unauthorized`() = runBlocking {
+        seed(3)
+        server.enqueue(MockResponse().setResponseCode(401).setBody("""{"error":"unauthorized"}"""))
+        assertFalse(auth.needsRepair.value)
+
+        assertEquals(CheckResult.Unauthorized, repo().checkForChanges())
+        assertTrue(auth.needsRepair.value)
+        assertEquals(SyncState(3, null, 1L), db.updateDao().syncState())
+
+        // Review Focus 4: it stays true, even after a later successful call, until clear().
+        server.enqueue(page(emptyList(), next = 3, more = false, etag = null))
+        assertEquals(CheckResult.NoChange, repo().checkForChanges())
+        assertTrue(auth.needsRepair.value)
+        auth.clear()
+        assertFalse(auth.needsRepair.value)
+    }
+
+    @Test
+    fun `io_error_returns_Offline`() = runBlocking {
+        seed(3, "\"e3\"", 3)
+        val before = snapshot()
+        val api = api()
+        server.shutdown() // connection refused
+        assertEquals(CheckResult.Offline, repo(api = api).checkForChanges())
+        assertEquals(before, snapshot())
+        assertFalse(auth.needsRepair.value)
+    }
+
+    @Test
+    fun `duplicate_ids_are_upserted_once`() = runBlocking {
+        seed(0)
+        // Item 2 is delivered twice across pages; item 3 is already notified locally.
+        server.enqueue(page(listOf(1, 2), next = 2, more = true))
+        server.enqueue(page(listOf(2, 3), next = 3, more = false))
+        val first = repo().checkForChanges() as CheckResult.NewItems
+        assertEquals(listOf(1L, 2L, 3L), first.items.map { it.id })
+        assertEquals(listOf(1L, 2L, 3L), db.updateDao().allById().map { it.id })
+        repo().markNotified(listOf(3L))
+
+        // Later delivery of 3 again (e.g. a re-sent page) plus a new 4: only 4 is new; 3 keeps notified=true.
+        server.enqueue(page(listOf(3, 4), next = 4, more = false))
+        val second = repo().checkForChanges() as CheckResult.NewItems
+        assertEquals(listOf(4L), second.items.map { it.id })
+        val rows = db.updateDao().allById()
+        assertEquals(listOf(1L, 2L, 3L, 4L), rows.map { it.id })
+        assertTrue(rows.single { it.id == 3L }.notified)
+        assertFalse(rows.single { it.id == 4L }.notified)
+
+        // Only known ids: NoChange.
+        server.enqueue(page(listOf(4), next = 4, more = false))
+        assertEquals(CheckResult.NoChange, repo().checkForChanges())
+        assertEquals(4, db.updateDao().allById().size)
+    }
+
+    // ---------------------------------------------------------------- data flow details
+
+    @Test
+    fun fresh_install_baselines_from_latest_and_never_from_zero() = runBlocking {
+        server.enqueue(latest(42))
+        assertEquals(CheckResult.NoChange, repo().checkForChanges())
+        assertEquals(SyncState(42, null, 1_000L), db.updateDao().syncState())
+        assertTrue(db.updateDao().allById().isEmpty())
+        assertEquals("/api/v1/changes/latest", take().path)
+        assertEquals(1, server.requestCount)
+    }
+
+    @Test
+    fun backlog_of_ten_pages_is_paged_in_one_check_and_cursor_ends_at_last_id() = runBlocking {
+        seed(0)
+        for (p in 0 until 10) {
+            val ids = (p * 50L + 1..p * 50L + 50).toList()
+            server.enqueue(page(ids, next = ids.last(), more = p < 9))
+        }
+        val result = repo().checkForChanges() as CheckResult.NewItems
+        assertEquals(500, result.items.size)
+        assertEquals((1L..500L).toList(), result.items.map { it.id })
+        assertEquals(500L, db.updateDao().syncState()!!.cursor)
+        assertEquals("\"e500\"", db.updateDao().syncState()!!.etag)
+        assertEquals(10, server.requestCount)
+        val requests = (0 until 10).map { take() }
+        assertEquals("/api/v1/changes?since=450&limit=50", requests.last().path)
+        assertTrue("later pages carry no If-None-Match", requests.drop(1).all { it.getHeader("If-None-Match") == null })
+    }
+
+    @Test
+    fun page_cap_stops_a_server_that_never_ends() = runBlocking {
+        seed(0)
+        for (p in 0 until 5) server.enqueue(page(listOf(p * 2L + 1, p * 2L + 2), next = p * 2L + 2, more = true))
+        val result = repo(maxPages = 3).checkForChanges() as CheckResult.NewItems
+        assertEquals((1L..6L).toList(), result.items.map { it.id })
+        assertEquals(SyncState(6, null, 1_000L), db.updateDao().syncState())
+        assertEquals(3, server.requestCount)
+    }
+
+    @Test
+    fun empty_items_without_more_returns_NoChange_and_stores_no_items() = runBlocking {
+        seed(8, null)
+        server.enqueue(page(emptyList(), next = 8, more = false, etag = "\"e8\""))
+        val counting = CountingCache(RoomUpdatesCache(db))
+        assertEquals(CheckResult.NoChange, repo(cache = counting).checkForChanges())
+        assertTrue(db.updateDao().allById().isEmpty())
+        // The new ETag is remembered once so the next check can be a 304.
+        assertEquals(SyncState(8, "\"e8\"", 1_000L), db.updateDao().syncState())
+
+        server.enqueue(page(emptyList(), next = 8, more = false, etag = "\"e8\""))
+        counting.writes = 0
+        assertEquals(CheckResult.NoChange, repo(cache = counting).checkForChanges())
+        assertEquals("same ETag: no write", 0, counting.writes)
+    }
+
+    @Test
+    fun malformed_json_returns_Offline() = runBlocking {
+        seed(1, "\"e1\"")
+        val before = snapshot()
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").setBody("""{"items":[{"id":"""))
+        assertEquals(CheckResult.Offline, repo().checkForChanges())
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").setBody("<html>proxy login</html>"))
+        assertEquals(CheckResult.Offline, repo().checkForChanges())
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").setBody("""{"items":[]}"""))
+        assertEquals("missing next_cursor", CheckResult.Offline, repo().checkForChanges())
+        assertEquals(before, snapshot())
+    }
+
+    @Test
+    fun oversized_body_returns_Offline() = runBlocking {
+        seed(1)
+        val before = snapshot()
+        val big = (2L..200L).toList()
+        server.enqueue(page(big, next = 200, more = false))
+        assertEquals(CheckResult.Offline, repo(api = api(maxBodyBytes = 4_096)).checkForChanges())
+        assertEquals(before, snapshot())
+    }
+
+    @Test
+    fun more_items_than_requested_are_still_stored() = runBlocking {
+        seed(0)
+        server.enqueue(page((1L..120L).toList(), next = 120, more = false))
+        val result = repo().checkForChanges() as CheckResult.NewItems
+        assertEquals(120, result.items.size)
+        assertEquals(120L, db.updateDao().syncState()!!.cursor)
+    }
+
+    @Test
+    fun unknown_fields_and_awkward_chapters_round_trip_through_room() = runBlocking {
+        seed(0)
+        val chapters = """["Ch. 1, \"part\" a", "a;b|c", "", "日本語 🎉", "[x]"]"""
+        val extra = ""","suwayomi_id":5,"nested":{"a":[1,{"b":null}]}"""
+        val one = item(1, title = "<b>Café</b> \"quoted\"", chapters = chapters, extra = extra)
+        val body = """{"items":[$one],"next_cursor":1,"has_more":false,"new_top_level":true}"""
+        server.enqueue(MockResponse().setResponseCode(200).setHeader("Content-Type", "application/json").setBody(body))
+        val stored = (repo().checkForChanges() as CheckResult.NewItems).items.single()
+        assertEquals("<b>Café</b> \"quoted\"", stored.title)
+        val row = db.updateDao().allById().single()
+        assertEquals(listOf("Ch. 1, \"part\" a", "a;b|c", "", "日本語 🎉", "[x]"), row.chapters)
+    }
+
+    @Test
+    fun other_http_status_returns_Offline_without_moving_cursor() = runBlocking {
+        seed(4, "\"e4\"")
+        for (code in listOf(500, 503, 429, 403, 400)) {
+            server.enqueue(MockResponse().setResponseCode(code).setBody("""{"error":"x"}"""))
+            assertEquals("status $code", CheckResult.Offline, repo().checkForChanges())
+        }
+        assertEquals(SyncState(4, "\"e4\"", 1L), db.updateDao().syncState())
+        assertFalse(auth.needsRepair.value)
+    }
+
+    @Test
+    fun failure_on_a_later_page_stores_nothing() = runBlocking {
+        seed(0)
+        server.enqueue(page(listOf(1, 2), next = 2, more = true))
+        server.enqueue(MockResponse().setResponseCode(500))
+        assertEquals(CheckResult.Offline, repo().checkForChanges())
+        assertEquals(SyncState(0, null, 1L), db.updateDao().syncState())
+        assertTrue(db.updateDao().allById().isEmpty())
+    }
+
+    @Test
+    fun cursor_moving_backwards_is_rejected() = runBlocking {
+        seed(50)
+        server.enqueue(page(listOf(10), next = 10, more = false))
+        assertEquals(CheckResult.Offline, repo().checkForChanges())
+        assertEquals(50L, db.updateDao().syncState()!!.cursor)
+    }
+
+    @Test
+    fun not_paired_is_Unauthorized() = runBlocking {
+        assertEquals(CheckResult.Unauthorized, repo(api = null).checkForChanges())
+        assertTrue(auth.needsRepair.value)
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun baseline_throws_and_marks_auth_on_401() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401))
+        val thrown = runCatching { repo().baseline() }.exceptionOrNull()
+        assertNotNull(thrown)
+        assertTrue(auth.needsRepair.value)
+        assertNull(db.updateDao().syncState())
+    }
+
+    @Test
+    fun `401_from_any_api_call_sets_needsRepair`() = runBlocking {
+        server.enqueue(MockResponse().setResponseCode(401))
+        assertEquals(401, api().run().code())
+        assertTrue(auth.needsRepair.value)
+    }
+
+    @Test
+    fun feed_is_newest_first() = runBlocking {
+        val cache = RoomUpdatesCache(db)
+        cache.applyChanges(
+            listOf(
+                entity(1).copy(createdAt = "2026-11-01T10:00:00+00:00"),
+                entity(2).copy(createdAt = "2026-11-03T10:00:00+00:00"),
+                entity(3).copy(createdAt = "2026-11-03T10:00:00+00:00"),
+            ),
+            SyncState(3, null, 1L),
+        )
+        assertEquals(listOf(3L, 2L, 1L), repo(cache = cache).feed.first().map { it.id })
+    }
+}

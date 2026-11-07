@@ -22,3 +22,5 @@ local.properties
 *.jks
 *.apk
 *.aab
+# data/ above is the server's runtime folder; Kotlin packages named data are source.
+!android/app/src/**/data/

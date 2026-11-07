@@ -92,6 +92,22 @@ jobs:
           echo "::error::verification-metadata.xml was (re)generated, so this run did not verify dependencies. Commit the artifact and re-run."
           exit 1
 
+      - name: Unit test counts (JUnit XML)
+        if: always()
+        run: |
+          shopt -s nullglob
+          files=(app/build/test-results/testDebugUnitTest/*.xml)
+          if [ ${#files[@]} -eq 0 ]; then echo "no JUnit XML found"; exit 0; fi
+          for f in "${files[@]}"; do
+            grep -o '<testsuite name="[^"]*" tests="[0-9]*" skipped="[0-9]*" failures="[0-9]*" errors="[0-9]*"' "$f" || true
+          done
+          cat "${files[@]}" | grep -o '<testsuite [^>]*' | sed -E 's/.* tests="([0-9]+)" skipped="([0-9]+)" failures="([0-9]+)" errors="([0-9]+)".*/\1 \2 \3 \4/' \
+            | awk '{t+=$1; s+=$2; f+=$3; e+=$4} END {printf "TOTAL tests=%d skipped=%d failures=%d errors=%d\n", t, s, f, e}'
+          echo "Failed test cases:"
+          for f in "${files[@]}"; do
+            grep -A1 '<testcase ' "$f" | grep -B1 -E '<(failure|error) ' | grep -o 'testcase name="[^"]*" classname="[^"]*"' || true
+          done
+
       - name: Show merged debug manifest permissions and exported components
         run: |
           m=$(find app/build/intermediates -path '*merged_manifest*debug*' -name AndroidManifest.xml | head -n 1)
