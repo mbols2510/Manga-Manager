@@ -1,5 +1,6 @@
 package com.mbols2510.mangamanager.data.api
 
+import java.io.File
 import java.io.IOException
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -154,22 +155,56 @@ class AuthInterceptorTest {
 
     @Test
     fun redirect_to_other_host_drops_authorization() {
-        val b = server(bind = "0.0.0.0")
-        b.enqueue(MockResponse().setResponseCode(200).setBody("landed"))
-        val a = server()
-        // 127.0.0.2 is another host (loopback, so UrlPolicy allows plain HTTP), served by b on every address.
-        val target = b.base(host = "127.0.0.2").resolve("landing")!!
-        a.enqueue(MockResponse().setResponseCode(302).setHeader("Location", target.toString()))
+        for (code in listOf(302, 307, 308)) {
+            val b = server(bind = "0.0.0.0")
+            b.enqueue(MockResponse().setResponseCode(200).setBody("landed"))
+            val a = server()
+            // 127.0.0.2 is another host (loopback, so UrlPolicy allows plain HTTP), served by b on every address.
+            val target = b.base(host = "127.0.0.2").resolve("landing")!!
+            a.enqueue(MockResponse().setResponseCode(code).setHeader("Location", target.toString()))
 
-        val client = MangaApiFactory.client(a.base(), { token })
-        client.newCall(Request.Builder().url(a.base().resolve("api/status")!!).build()).execute().use {
-            assertEquals(200, it.code)
-            assertEquals("landed", it.body.string())
+            val client = MangaApiFactory.client(a.base(), { token })
+            client.newCall(Request.Builder().url(a.base().resolve("api/status")!!).build()).execute().use {
+                assertEquals("redirect $code", 200, it.code)
+                assertEquals("landed", it.body.string())
+            }
+            assertEquals("Bearer $token", a.takeRequest(5, TimeUnit.SECONDS)!!.getHeader("Authorization"))
+            val landed = b.takeRequest(5, TimeUnit.SECONDS)!!
+            assertEquals("/landing", landed.path)
+            assertNull("Authorization must not reach another host ($code)", landed.getHeader("Authorization"))
+            assertFalse("no token in any header ($code)", landed.headers.toString().contains(token))
         }
+    }
+
+    @Test
+    fun relative_redirect_on_same_origin_keeps_authorization() {
+        val a = server()
+        a.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/landing"))
+        a.enqueue(MockResponse().setResponseCode(200).setBody("ok"))
+        MangaApiFactory.client(a.base(), { token })
+            .newCall(Request.Builder().url(a.base().resolve("api/status")!!).build()).execute().use {
+                assertEquals(200, it.code)
+            }
         assertEquals("Bearer $token", a.takeRequest(5, TimeUnit.SECONDS)!!.getHeader("Authorization"))
-        val landed = b.takeRequest(5, TimeUnit.SECONDS)!!
-        assertEquals("/landing", landed.path)
-        assertNull("Authorization must not reach another host", landed.getHeader("Authorization"))
+        val second = a.takeRequest(5, TimeUnit.SECONDS)!!
+        assertEquals("/landing", second.path)
+        assertEquals("Bearer $token", second.getHeader("Authorization"))
+    }
+
+    @Test
+    fun unauthorized_from_a_foreign_origin_does_not_call_the_callback() = runBlocking {
+        val b = server(bind = "0.0.0.0")
+        b.enqueue(MockResponse().setResponseCode(401))
+        val a = server()
+        a.enqueue(MockResponse().setResponseCode(302).setHeader("Location", b.base(host = "127.0.0.2").resolve("x")!!.toString()))
+        a.enqueue(MockResponse().setResponseCode(401))
+        val calls = AtomicInteger()
+        val api = MangaApiFactory.create(a.base(), { token }, { calls.incrementAndGet() })
+
+        assertEquals(401, api.run().code())
+        assertEquals("a 401 from another host says nothing about our token", 0, calls.get())
+        assertEquals(401, api.run().code())
+        assertEquals("a 401 from the paired server does", 1, calls.get())
     }
 
     /** Our own interceptors strip the header; this does not rely on OkHttp's redirect handling. */
@@ -201,7 +236,9 @@ class AuthInterceptorTest {
         secure.enqueue(MockResponse().setResponseCode(302).setHeader("Location", httpTarget.toString()))
 
         val base = secure.base(scheme = "https")
-        val client = MangaApiFactory.buildClient(base, { token }, {}, tls = tls.clientFactory to tls.trust)
+        val client = tls.trusting(MangaApiFactory.client(base, { token }))
+        assertFalse("the factory's client is kept", client.followSslRedirects)
+        assertTrue(client.networkInterceptors.single() is RedirectGuardInterceptor)
         client.newCall(Request.Builder().url(base.resolve("api/status")!!).build()).execute().use {
             assertEquals("the redirect is handed back, not followed", 302, it.code)
         }
@@ -216,6 +253,41 @@ class AuthInterceptorTest {
             assertFalse(e.message.orEmpty().contains(token))
         }
         assertEquals(0, plain.requestCount)
+    }
+
+    @Test
+    fun scheme_change_on_a_redirect_hop_is_refused_even_if_ssl_redirects_were_followed() {
+        val tls = testTls()
+        val plain = server()
+        plain.enqueue(MockResponse().setResponseCode(200).setBody("cleartext"))
+        val secure = server(tls = tls.serverFactory)
+        val httpTarget = plain.base().resolve("api/status")!!
+        secure.enqueue(MockResponse().setResponseCode(302).setHeader("Location", httpTarget.toString()))
+
+        val base = secure.base(scheme = "https")
+        val forced = tls.trusting(MangaApiFactory.client(base, { token })).newBuilder().followSslRedirects(true).build()
+        try {
+            forced.newCall(Request.Builder().url(base.resolve("api/status")!!).build()).execute().close()
+            fail("expected the network interceptor to refuse the http hop")
+        } catch (e: UrlPolicyViolation) {
+            assertFalse(e.message.orEmpty().contains(token))
+        }
+        assertEquals(1, secure.requestCount)
+        assertEquals("nothing may reach the http server", 0, plain.requestCount)
+    }
+
+    /** Ruling 13: system trust store only. No code in src/main may be able to replace TLS trust or host checks. */
+    @Test
+    fun main_sources_cannot_override_tls_trust() {
+        val main = File("src/main")
+        val sources = main.walkTopDown().filter { it.isFile && (it.extension == "kt" || it.extension == "java") }.toList()
+        assertTrue("no sources found under ${main.absolutePath}", sources.size > 5)
+        val forbidden = listOf("sslSocketFactory", "hostnameVerifier", "X509TrustManager")
+        val hits = sources.flatMap { f ->
+            val text = f.readText()
+            forbidden.filter { text.contains(it, ignoreCase = true) }.map { "${f.path}: $it" }
+        }
+        assertEquals("forbidden TLS overrides in src/main", emptyList<String>(), hits)
     }
 
     // ---------------------------------------------------------------- proxy selector
@@ -283,7 +355,10 @@ class AuthInterceptorTest {
         assertEquals(100L, c.files.single().id)
     }
 
-    private class TestTls(val serverFactory: SSLSocketFactory, val clientFactory: SSLSocketFactory, val trust: X509TrustManager)
+    private class TestTls(val serverFactory: SSLSocketFactory, val clientFactory: SSLSocketFactory, val trust: X509TrustManager) {
+        /** The factory's client (interceptors, timeouts, proxy, redirect rules kept) trusting only the test certificate. */
+        fun trusting(client: OkHttpClient): OkHttpClient = client.newBuilder().sslSocketFactory(clientFactory, trust).build()
+    }
 
     /** A self-signed test certificate for localhost / 127.0.0.1 (src/test/resources/tls, test use only). */
     private fun testTls(): TestTls {

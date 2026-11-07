@@ -4,7 +4,22 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.mbols2510.mangamanager.core.TokenStore
+import com.mbols2510.mangamanager.data.api.ChangesDto
+import com.mbols2510.mangamanager.data.api.DoubleSeriesDto
+import com.mbols2510.mangamanager.data.api.DoubleSeriesSummaryDto
+import com.mbols2510.mangamanager.data.api.DoublesStatusDto
+import com.mbols2510.mangamanager.data.api.HealthDto
+import com.mbols2510.mangamanager.data.api.KavitaScanRequest
+import com.mbols2510.mangamanager.data.api.KavitaScanResultDto
+import com.mbols2510.mangamanager.data.api.LatestDto
 import com.mbols2510.mangamanager.data.api.MangaApi
+import com.mbols2510.mangamanager.data.api.RemediateRequest
+import com.mbols2510.mangamanager.data.api.RemediateResultDto
+import com.mbols2510.mangamanager.data.api.RunDto
+import com.mbols2510.mangamanager.data.api.StatusDto
+import com.mbols2510.mangamanager.data.api.TrashEntryDto
+import com.mbols2510.mangamanager.data.api.UpdateDto
+import com.mbols2510.mangamanager.data.api.UpdatesPageDto
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
 import com.mbols2510.mangamanager.data.db.AppDatabase
 import com.mbols2510.mangamanager.data.db.RoomUpdatesCache
@@ -13,9 +28,15 @@ import com.mbols2510.mangamanager.data.db.UpdateEntity
 import com.mbols2510.mangamanager.data.db.UpdatesCache
 import java.net.InetAddress
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import okhttp3.HttpUrl
+import okhttp3.ResponseBody
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.RecordedRequest
@@ -331,6 +352,11 @@ class UpdatesRepositoryTest {
             server.enqueue(MockResponse().setResponseCode(code).setBody("""{"error":"x"}"""))
             assertEquals("status $code", CheckResult.Offline, repo().checkForChanges())
         }
+        // 3xx answers OkHttp cannot follow (no Location) are handed back and are not success either.
+        for (code in listOf(300, 302, 307)) {
+            server.enqueue(MockResponse().setResponseCode(code))
+            assertEquals("status $code without Location", CheckResult.Offline, repo().checkForChanges())
+        }
         assertEquals(SyncState(4, "\"e4\"", 1L), db.updateDao().syncState())
         assertFalse(auth.needsRepair.value)
     }
@@ -419,5 +445,126 @@ class UpdatesRepositoryTest {
         assertNull("a stored URL that fails UrlPolicy gives no client", provider())
         url = null
         assertNull(provider())
+    }
+
+    // ---------------------------------------------------------------- fix round 1
+
+    @Test
+    fun throwing_api_supplier_returns_Offline() = runBlocking {
+        seed(3)
+        val repo = DefaultUpdatesRepository({ throw IllegalStateException("stored URL could not be read") }, RoomUpdatesCache(db), auth, { now })
+        assertEquals(CheckResult.Offline, repo.checkForChanges())
+        assertFalse(auth.needsRepair.value)
+        assertEquals(SyncState(3, null, 1L), db.updateDao().syncState())
+    }
+
+    @Test
+    fun has_more_without_cursor_progress_stops_after_one_request() = runBlocking {
+        seed(0)
+        // A misbehaving server: always has_more=true, next_cursor == since.
+        repeat(5) { server.enqueue(page(listOf(1, 2), next = 0, more = true)) }
+        val result = repo().checkForChanges() as CheckResult.NewItems
+        assertEquals(listOf(1L, 2L), result.items.map { it.id })
+        assertEquals("exactly one request, not up to the page cap", 1, server.requestCount)
+        assertEquals("cursor does not move backwards or forwards", 0L, db.updateDao().syncState()!!.cursor)
+        assertNull(db.updateDao().syncState()!!.etag)
+    }
+
+    @Test
+    fun unauthorized_from_a_foreign_host_after_redirect_does_not_mark_repair() = runBlocking {
+        seed(5)
+        val other = MockWebServer().apply { start(InetAddress.getByName("0.0.0.0"), 0) }
+        try {
+            other.enqueue(MockResponse().setResponseCode(401))
+            val foreign = HttpUrl.Builder().scheme("http").host("127.0.0.2").port(other.port).encodedPath("/x").build()
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", foreign.toString()))
+            assertEquals(CheckResult.Offline, repo().checkForChanges())
+            assertFalse(auth.needsRepair.value)
+            assertEquals(5L, db.updateDao().syncState()!!.cursor)
+        } finally {
+            runCatching { other.shutdown() }
+        }
+    }
+
+    /** A MangaApi whose `changes` serves cursor-based pages; the first call waits for [gate]. */
+    private class GatedApi(private val gate: CompletableDeferred<Unit>) : MangaApi {
+        val sinces = java.util.Collections.synchronizedList(mutableListOf<Long>())
+        @Volatile var active = 0
+        @Volatile var maxActive = 0
+
+        override suspend fun changes(since: Long, limit: Int, ifNoneMatch: String?): retrofit2.Response<ChangesDto> {
+            val first = synchronized(sinces) { sinces.add(since); sinces.size == 1 }
+            active++
+            maxActive = maxOf(maxActive, active)
+            try {
+                if (first) gate.await()
+                val body = if (since < 3) {
+                    ChangesDto((since + 1..3L).map { UpdateDto(id = it, title = "t$it", createdAt = "2026-11-01T00:00:00+00:00") }, 3, false)
+                } else {
+                    ChangesDto(emptyList(), since, false)
+                }
+                return retrofit2.Response.success(body)
+            } finally {
+                active--
+            }
+        }
+
+        override suspend fun latest(): LatestDto = LatestDto(0)
+        override suspend fun updates(limit: Int, offset: Int, query: String?, category: String?, kind: String?): UpdatesPageDto = error("unused")
+        override suspend fun status(): StatusDto = error("unused")
+        override suspend fun run(): retrofit2.Response<RunDto> = error("unused")
+        override suspend fun health(): HealthDto = error("unused")
+        override suspend fun doubleSeries(): List<DoubleSeriesSummaryDto> = error("unused")
+        override suspend fun doubleSeriesDetail(seriesId: Long): DoubleSeriesDto = error("unused")
+        override suspend fun doubleCover(seriesId: Long): ResponseBody = error("unused")
+        override suspend fun remediate(seriesId: Long, chapterId: Long, body: RemediateRequest): retrofit2.Response<RemediateResultDto> = error("unused")
+        override suspend fun kavitaScan(seriesId: Long, body: KavitaScanRequest): retrofit2.Response<KavitaScanResultDto> = error("unused")
+        override suspend fun trash(): List<TrashEntryDto> = error("unused")
+        override suspend fun restoreTrash(trashId: String): retrofit2.Response<TrashEntryDto> = error("unused")
+        override suspend fun doublesStatus(): DoublesStatusDto = error("unused")
+    }
+
+    private suspend fun waitFor(condition: () -> Boolean) {
+        withTimeout(5_000) { while (!condition()) delay(10) }
+    }
+
+    @Test
+    fun concurrent_checks_run_one_after_the_other() = runBlocking {
+        seed(0)
+        val gate = CompletableDeferred<Unit>()
+        val api = GatedApi(gate)
+        val repo = DefaultUpdatesRepository({ api }, RoomUpdatesCache(db), auth, { now })
+        val first = async { repo.checkForChanges() }
+        val second = async { repo.checkForChanges() }
+        val callsWhileFirstRuns: Int
+        try {
+            waitFor { api.sinces.size >= 1 }
+            delay(200) // give the second check every chance to start its HTTP call
+            callsWhileFirstRuns = api.sinces.size
+        } finally {
+            gate.complete(Unit)
+        }
+        val results = withTimeout(5_000) { listOf(first.await(), second.await()) }
+        assertEquals("the second check must not call the API while the first runs", 1, callsWhileFirstRuns)
+        assertEquals(1, api.maxActive)
+        assertEquals("the second check starts from the first one's cursor", listOf(0L, 3L), api.sinces.toList())
+        assertEquals(listOf(1L, 2L, 3L), (results[0] as CheckResult.NewItems).items.map { it.id })
+        assertEquals(CheckResult.NoChange, results[1])
+        assertEquals(3L, db.updateDao().syncState()!!.cursor)
+    }
+
+    @Test
+    fun cancelled_check_propagates_cancellation_and_releases_the_lock() = runBlocking {
+        seed(0)
+        val api = GatedApi(CompletableDeferred()) // the first call never gets through
+        val repo = DefaultUpdatesRepository({ api }, RoomUpdatesCache(db), auth, { now })
+        val stuck = async { repo.checkForChanges() }
+        waitFor { api.sinces.size >= 1 }
+        stuck.cancel()
+        val thrown = runCatching { stuck.await() }.exceptionOrNull()
+        assertTrue("cancellation must propagate, got $thrown", thrown is CancellationException)
+        val next = withTimeout(5_000) { repo.checkForChanges() }
+        assertEquals(listOf(1L, 2L, 3L), (next as CheckResult.NewItems).items.map { it.id })
+        assertEquals(0L + 3L, db.updateDao().syncState()!!.cursor)
     }
 }
