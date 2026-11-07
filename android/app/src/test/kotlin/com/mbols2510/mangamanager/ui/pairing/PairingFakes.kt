@@ -54,6 +54,8 @@ class FakeUpdatesRepository(private val onBaseline: suspend () -> Unit = {}) : U
     }
 
     override suspend fun markNotified(ids: Collection<Long>) = Unit
+
+    override suspend fun pendingNotifications(): List<UpdateEntity> = emptyList()
 }
 
 /** A fake server for `changes/latest`: 401 without a valid token unless auth is disabled. */

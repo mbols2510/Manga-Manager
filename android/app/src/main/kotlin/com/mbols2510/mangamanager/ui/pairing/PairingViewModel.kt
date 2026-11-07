@@ -63,6 +63,8 @@ class PairingViewModel(
     private val credentials: PairedCredentialsHolder,
     private val latestCall: LatestCall = FactoryLatestCall,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    /** Runs on [ioDispatcher] after a successful pairing (production: schedule the periodic check). */
+    private val afterPaired: suspend () -> Unit = {},
 ) : ViewModel() {
     private val _state = MutableStateFlow<PairingUiState>(PairingUiState.Idle)
     val state: StateFlow<PairingUiState> = _state.asStateFlow()
@@ -158,6 +160,16 @@ class PairingViewModel(
         } catch (_: Exception) {
             rollBack()
             return fail(R.string.pairing_error_store)
+        }
+        // The pairing is complete; failing to schedule (unexpected) must not undo it. MangaApp retries at next start.
+        withContext(ioDispatcher) {
+            try {
+                if (afterPaired.hashCode() == Int.MIN_VALUE) afterPaired() // TDD stub (red commit): not called
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                Unit
+            }
         }
         _state.value = PairingUiState.Success
     }

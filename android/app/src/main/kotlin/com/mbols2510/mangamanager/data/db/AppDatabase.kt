@@ -54,6 +54,10 @@ interface UpdateDao {
     @Query("SELECT * FROM updates ORDER BY id ASC")
     suspend fun allById(): List<UpdateEntity>
 
+    /** Stored items whose notification decision was not taken yet (ruling 21), oldest first. */
+    @Query("SELECT * FROM updates WHERE notified = 0 ORDER BY id ASC")
+    suspend fun pendingNotifications(): List<UpdateEntity>
+
     @Query("SELECT * FROM sync_state WHERE id = 0")
     suspend fun syncState(): SyncState?
 

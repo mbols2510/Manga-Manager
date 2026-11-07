@@ -48,5 +48,19 @@
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"
             tools:node="remove" />
+
+        <!-- WorkManager is initialized on demand from MangaApp (Configuration.Provider with the CheckWorker
+             factory), so its App Startup initializer is removed as WorkManager's documentation requires. The
+             provider itself stays (merge) for the other libraries' initializers; it is not exported. -->
+        <provider
+            android:name="androidx.startup.InitializationProvider"
+            android:authorities="${applicationId}.androidx-startup"
+            android:exported="false"
+            tools:node="merge">
+            <meta-data
+                android:name="androidx.work.WorkManagerInitializer"
+                android:value="androidx.startup"
+                tools:node="remove" />
+        </provider>
     </application>
 </manifest>

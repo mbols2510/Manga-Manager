@@ -99,6 +99,40 @@ class PairingViewModelTest {
     }
 
     @Test
+    fun successful_pairing_clears_the_persisted_repair_flag_then_schedules_checks() = runTest(dispatcher) {
+        auth.markUnauthorized()
+        settings.setNeedsRepair(true)
+        var repairFlagWhenScheduled: Boolean? = null
+        val vm = PairingViewModel(
+            tokens, settings, auth, repo, PairedCredentialsHolder(), server, dispatcher,
+            afterPaired = { repairFlagWhenScheduled = settings.needsRepair() },
+        )
+
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+
+        assertEquals(PairingUiState.Success, vm.state.value)
+        assertFalse(settings.needsRepair())
+        assertEquals("scheduled once, after the flag was cleared", false, repairFlagWhenScheduled)
+    }
+
+    @Test
+    fun failed_pairing_keeps_the_persisted_repair_flag_and_schedules_nothing() = runTest(dispatcher) {
+        settings.setNeedsRepair(true)
+        baselineFailure = IOException("offline")
+        var scheduled = 0
+        val vm = PairingViewModel(
+            tokens, settings, auth, repo, PairedCredentialsHolder(), server, dispatcher,
+            afterPaired = { scheduled++ },
+        )
+
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+
+        assertEquals(PairingUiState.Error(R.string.pairing_error_store), vm.state.value)
+        assertTrue(settings.needsRepair())
+        assertEquals(0, scheduled)
+    }
+
+    @Test
     fun invalid_code_shows_error_and_stores_nothing() = runTest(dispatcher) {
         val vm = viewModel()
         vm.submit("this is not a pairing code")
@@ -247,7 +281,8 @@ class PairingViewModelTest {
             override fun clear() { log += "token.clear[holder=${held()}]" }
         }
         val urlState = MutableStateFlow<String?>(null)
-        val urls = object : SettingsStore {
+        // The other settings (check settings, repair flag) are plain in-memory values; only URL writes are logged.
+        val urls = object : SettingsStore by FakeSettingsStore() {
             override val serverUrl: Flow<String?> = urlState
             override suspend fun serverUrl(): String? = urlState.value
             override suspend fun setServerUrl(url: String?) {

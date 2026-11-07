@@ -49,8 +49,17 @@ interface UpdatesRepository {
      */
     suspend fun baseline()
 
-    /** Records that these ids were notified (or deliberately not), so they are never reported again. */
+    /**
+     * Records that the notification decision for these ids is taken (posted, suppressed by quiet hours, or
+     * notifications unavailable), so they are never reported again (ruling 21).
+     */
     suspend fun markNotified(ids: Collection<Long>)
+
+    /**
+     * Stored items whose notification decision is not taken yet, oldest first. The worker reads them at the start of
+     * every check, so a crash between storing items and [markNotified] notifies them once on the next run.
+     */
+    suspend fun pendingNotifications(): List<UpdateEntity>
 }
 
 /**
@@ -116,6 +125,8 @@ class DefaultUpdatesRepository internal constructor(
     }
 
     override suspend fun markNotified(ids: Collection<Long>) = cache.markNotified(ids)
+
+    override suspend fun pendingNotifications(): List<UpdateEntity> = cache.pendingNotifications()
 
     private suspend fun baselineWith(client: MangaApi) {
         val latest = client.latest()

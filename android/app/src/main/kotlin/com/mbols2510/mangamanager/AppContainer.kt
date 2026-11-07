@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.work.WorkManager
 import com.mbols2510.mangamanager.core.CachingTokenStore
 import com.mbols2510.mangamanager.core.KeystoreTokenStore
 import com.mbols2510.mangamanager.core.TokenStore
@@ -19,8 +20,16 @@ import com.mbols2510.mangamanager.data.repo.DefaultUpdatesRepository
 import com.mbols2510.mangamanager.data.repo.PairedBaseUrl
 import com.mbols2510.mangamanager.data.repo.StoredPairingApi
 import com.mbols2510.mangamanager.data.repo.UpdatesRepository
+import com.mbols2510.mangamanager.notify.LocalNotifier
+import com.mbols2510.mangamanager.notify.Notifier
 import com.mbols2510.mangamanager.ui.AppViewModel
 import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
+import com.mbols2510.mangamanager.work.CheckWorker
+import com.mbols2510.mangamanager.work.DeviceClock
+import com.mbols2510.mangamanager.work.Scheduler
+import java.time.Clock
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
 /**
@@ -73,14 +82,47 @@ class AppContainer internal constructor(
         val base = baseUrl()
         val token = tokenStore.cachedToken
         if (base != null && token != null) credentials.publishIfUntouched(base, token)
+        // AuthState lives in memory; a 401 seen by an earlier process (the worker) is persisted in the settings.
+        if (settingsStore.needsRepair() && authState.hashCode() == Int.MIN_VALUE) authState.markUnauthorized() // TDD stub
+    }
+
+    /**
+     * App start, after [warmUp]: keeps the periodic check scheduled while paired and not waiting for a re-pair.
+     * `Scheduler.apply` uses the UPDATE policy, so an unchanged schedule keeps its timing. Call on IO.
+     */
+    suspend fun scheduleChecksIfPaired() {
+        if (credentials.get() != null && !authState.needsRepair.value) scheduler.apply(settingsStore.checkSettings())
     }
 
     /** Unpairs: the request path stops first, then the persisted token and URL are removed. Call on IO. */
     suspend fun unpair() {
         credentials.clear()
+        scheduler.cancel()
         tokenStore.clear()
         settingsStore.clearAll()
     }
+
+    /** Time source for the background check (device default time zone, read on every call). */
+    val clock: Clock = DeviceClock
+
+    val notifier: Notifier by lazy { LocalNotifier(appContext) }
+
+    /** WorkManager is initialized on demand with `MangaApp`'s configuration (its worker factory). */
+    val scheduler: Scheduler by lazy { Scheduler(WorkManager.getInstance(appContext)) }
+
+    /** Everything `CheckWorker` needs, for `CheckWorkerFactory`. */
+    fun checkWorkerDependencies(): CheckWorker.Dependencies = CheckWorker.Dependencies(
+        // Always run it (idempotent): it also publishes the stored pairing, which a half-finished start-up
+        // warm-up may not have done yet. One Keystore read per check, on IO.
+        warmUp = { withContext(Dispatchers.IO) { warmUp() } },
+        isPaired = { credentials.get() != null },
+        repository = updatesRepository,
+        settings = settingsStore,
+        authState = authState,
+        notifier = notifier,
+        scheduler = scheduler,
+        clock = clock,
+    )
 
     /** API supplier for the repository: Offline-by-exception while the caches are cold, null when not paired. */
     val pairingApi: StoredPairingApi by lazy {
@@ -98,6 +140,11 @@ class AppContainer internal constructor(
 
     val factory: ViewModelProvider.Factory = viewModelFactory {
         initializer { AppViewModel(tokenStore, settingsStore, authState) }
-        initializer { PairingViewModel(tokenStore, settingsStore, authState, updatesRepository, credentials) }
+        initializer {
+            PairingViewModel(
+                tokenStore, settingsStore, authState, updatesRepository, credentials,
+                afterPaired = { scheduler.apply(settingsStore.checkSettings()) },
+            )
+        }
     }
 }

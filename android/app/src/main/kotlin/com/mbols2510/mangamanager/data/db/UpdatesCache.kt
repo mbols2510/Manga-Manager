@@ -15,7 +15,11 @@ interface UpdatesCache {
      */
     suspend fun applyChanges(items: List<UpdateEntity>, state: SyncState): List<UpdateEntity>
 
+    /** Sets `notified` for these ids: the notification decision for them is taken. */
     suspend fun markNotified(ids: Collection<Long>)
+
+    /** Stored items whose notification decision is not taken yet (`notified == false`), oldest first. */
+    suspend fun pendingNotifications(): List<UpdateEntity>
 }
 
 /** Room implementation. [afterUpsert] runs inside the transaction between the upsert and the cursor write (tests inject a failure there). */
@@ -51,6 +55,9 @@ class RoomUpdatesCache internal constructor(
             ids.distinct().chunked(MAX_IDS_PER_QUERY).forEach { dao.markNotified(it) }
         }
     }
+
+    // TDD stub (red commit).
+    override suspend fun pendingNotifications(): List<UpdateEntity> = emptyList()
 
     private companion object {
         const val MAX_IDS_PER_QUERY = 500

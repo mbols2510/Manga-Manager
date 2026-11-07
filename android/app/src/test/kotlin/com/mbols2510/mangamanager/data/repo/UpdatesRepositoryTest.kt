@@ -496,6 +496,40 @@ class UpdatesRepositoryTest {
         }
     }
 
+    @Test
+    fun pending_notifications_are_stored_undecided_items_until_marked() = runBlocking {
+        seed(0)
+        server.enqueue(page(listOf(1, 2, 3), next = 3, more = false))
+        val repo = repo()
+        assertTrue(repo.pendingNotifications().isEmpty())
+
+        val result = repo.checkForChanges() as CheckResult.NewItems
+        assertEquals(listOf(1L, 2L, 3L), result.items.map { it.id })
+        // Stored, decision not taken yet: exactly what a crash right after the check would leave behind.
+        assertEquals(listOf(1L, 2L, 3L), repo.pendingNotifications().map { it.id })
+
+        repo.markNotified(listOf(1L, 3L))
+        assertEquals(listOf(2L), repo.pendingNotifications().map { it.id })
+        repo.markNotified(listOf(2L))
+        assertTrue(repo.pendingNotifications().isEmpty())
+        assertTrue(db.updateDao().allById().all { it.notified })
+
+        // A re-delivered id keeps its decision and is not pending again.
+        server.enqueue(page(listOf(2, 4), next = 4, more = false))
+        val again = repo.checkForChanges() as CheckResult.NewItems
+        assertEquals(listOf(4L), again.items.map { it.id })
+        assertEquals(listOf(4L), repo.pendingNotifications().map { it.id })
+    }
+
+    @Test
+    fun mark_notified_handles_more_ids_than_one_query_allows() = runBlocking {
+        val cache = RoomUpdatesCache(db)
+        cache.applyChanges((1L..1_200L).map { entity(it) }, SyncState(1_200, null, 1L))
+        assertEquals(1_200, cache.pendingNotifications().size)
+        cache.markNotified((1L..1_200L).toList())
+        assertTrue(cache.pendingNotifications().isEmpty())
+    }
+
     /** A MangaApi whose `changes` serves cursor-based pages; the first call waits for [gate]. */
     private class GatedApi(private val gate: CompletableDeferred<Unit>) : MangaApi {
         val sinces = java.util.Collections.synchronizedList(mutableListOf<Long>())

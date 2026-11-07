@@ -2,12 +2,18 @@ package com.mbols2510.mangamanager
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.Configuration
+import androidx.work.WorkManager
+import androidx.work.testing.SynchronousExecutor
+import androidx.work.testing.WorkManagerTestInitHelper
 import com.mbols2510.mangamanager.core.TokenStore
+import com.mbols2510.mangamanager.data.CheckSettings
 import com.mbols2510.mangamanager.data.FakeSettingsStore
 import com.mbols2510.mangamanager.data.SettingsStore
 import com.mbols2510.mangamanager.data.api.NotPairedException
 import com.mbols2510.mangamanager.data.repo.CheckResult
 import com.mbols2510.mangamanager.ui.pairing.FakeTokenStore
+import com.mbols2510.mangamanager.work.Scheduler
 import java.io.IOException
 import java.net.InetAddress
 import java.util.concurrent.Callable
@@ -23,6 +29,7 @@ import okhttp3.Request
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -39,6 +46,15 @@ private class HangingSettingsStore : SettingsStore {
     override val serverUrl: Flow<String?> = emptyFlow()
     override suspend fun serverUrl(): String? = awaitCancellation()
     override suspend fun setServerUrl(url: String?) = awaitCancellation()
+    override val checkSettings: Flow<CheckSettings> = emptyFlow()
+    override suspend fun checkSettings(): CheckSettings = awaitCancellation()
+    override suspend fun setCheckSettings(settings: CheckSettings) = awaitCancellation()
+    override val lastSuccessfulCheckAt: Flow<Long?> = emptyFlow()
+    override suspend fun lastSuccessfulCheckAt(): Long? = awaitCancellation()
+    override suspend fun setLastSuccessfulCheckAt(epochMillis: Long?) = awaitCancellation()
+    override val needsRepair: Flow<Boolean> = emptyFlow()
+    override suspend fun needsRepair(): Boolean = awaitCancellation()
+    override suspend fun setNeedsRepair(value: Boolean) = awaitCancellation()
     override suspend fun clearAll() = awaitCancellation()
 }
 
@@ -60,6 +76,55 @@ class AppContainerTest {
     private val context: Context = ApplicationProvider.getApplicationContext()
     private val servers = mutableListOf<MockWebServer>()
     private val executors = mutableListOf<java.util.concurrent.ExecutorService>()
+
+    @Before
+    fun setUp() {
+        // unpair() and the start-up scheduling reach WorkManager; use the test instance.
+        WorkManagerTestInitHelper.initializeTestWorkManager(context, Configuration.Builder().setExecutor(SynchronousExecutor()).build())
+    }
+
+    private fun activeChecks() = WorkManager.getInstance(context)
+        .getWorkInfosForUniqueWork(Scheduler.UNIQUE_WORK_NAME).get()
+        .filterNot { it.state.isFinished }
+
+    @Test
+    fun warm_up_restores_the_persisted_repair_flag() {
+        val container = AppContainer(context, FakeSettingsStore(needsRepair = true), FakeTokenStore())
+        assertFalse(container.authState.needsRepair.value)
+        runBlocking { container.warmUp() }
+        assertTrue("a 401 seen by the worker in an earlier process survives", container.authState.needsRepair.value)
+    }
+
+    @Test
+    fun app_start_schedules_checks_only_when_paired_and_unpair_cancels_them() {
+        val tokens = FakeTokenStore().apply { token = "tok_start_0123456789" }
+        val container = AppContainer(context, FakeSettingsStore("https://manga.example.com/"), tokens)
+        runBlocking {
+            container.warmUp()
+            container.scheduleChecksIfPaired()
+        }
+        assertEquals(1, activeChecks().size)
+        runBlocking { container.unpair() }
+        assertTrue(activeChecks().isEmpty())
+
+        val unpaired = AppContainer(context, FakeSettingsStore(), FakeTokenStore())
+        runBlocking {
+            unpaired.warmUp()
+            unpaired.scheduleChecksIfPaired()
+        }
+        assertTrue(activeChecks().isEmpty())
+
+        val revoked = AppContainer(
+            context,
+            FakeSettingsStore("https://manga.example.com/", needsRepair = true),
+            FakeTokenStore().apply { token = "tok_start_0123456789" },
+        )
+        runBlocking {
+            revoked.warmUp()
+            revoked.scheduleChecksIfPaired()
+        }
+        assertTrue("no checks while waiting for a re-pair", activeChecks().isEmpty())
+    }
 
     @After
     fun tearDown() {

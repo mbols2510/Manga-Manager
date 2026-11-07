@@ -26,4 +26,35 @@
     <string name="pairing_auth_disabled_message">The server at %1$s has authentication turned off: anyone on your network can use it without a token. Pair only if you trust every device on this private network.</string>
     <string name="pairing_auth_disabled_confirm">I understand, pair anyway</string>
     <string name="pairing_auth_disabled_cancel">Cancel</string>
+
+    <!-- Notifications (Task 9). Titles are inserted as plain text, never as HTML. -->
+    <string name="notification_channel_updates">Manga updates</string>
+    <string name="notification_channel_updates_description">New chapters and series from your server.</string>
+    <string name="notification_channel_updates_sensitive">Sensitive manga updates</string>
+    <string name="notification_channel_updates_sensitive_description">Updates in categories marked as mature on your server. Titles are never shown on the lock screen.</string>
+    <string name="notification_channel_system">Connection</string>
+    <string name="notification_channel_system_description">Problems that need your action, such as re-pairing this device.</string>
+    <string name="notification_public_title">New manga updates</string>
+    <string name="notification_public_text">Unlock to see what is new.</string>
+    <string name="notification_hidden_titles">Open the app to see the details.</string>
+    <string name="notification_list_separator">", "</string>
+    <string name="notification_titles_and_more">%1$s %2$s</string>
+    <plurals name="notification_new_chapters">
+        <item quantity="one">%d new chapter</item>
+        <item quantity="other">%d new chapters</item>
+    </plurals>
+    <plurals name="notification_new_series">
+        <item quantity="one">%d new series</item>
+        <item quantity="other">%d new series</item>
+    </plurals>
+    <plurals name="notification_updates">
+        <item quantity="one">%d update</item>
+        <item quantity="other">%d updates</item>
+    </plurals>
+    <plurals name="notification_and_more">
+        <item quantity="one">and %d more</item>
+        <item quantity="other">and %d more</item>
+    </plurals>
+    <string name="notification_repair_title">Re-pair this device</string>
+    <string name="notification_repair_text">Your server no longer accepts this device. Open the app and pair it again to resume update checks.</string>
 </resources>
