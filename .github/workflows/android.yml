@@ -76,6 +76,14 @@ jobs:
           path: android/gradle/verification-metadata.xml
           if-no-files-found: error
 
+      - name: Print generated verification metadata (gzip + base64, for environments that cannot download artifacts)
+        if: always() && env.WRITE_VERIFICATION == 'true'
+        run: |
+          sha256sum gradle/verification-metadata.xml
+          echo "-----BEGIN VERIFICATION METADATA-----"
+          gzip -9 -c gradle/verification-metadata.xml | base64 -w 120
+          echo "-----END VERIFICATION METADATA-----"
+
       - name: Fail when dependency verification was not enforced
         if: env.WRITE_VERIFICATION == 'true'
         run: |
