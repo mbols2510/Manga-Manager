@@ -150,11 +150,12 @@ and `feature/**` and on pull requests, whenever they touch `android/`. That work
   permissions, no `android.util.Log` calls in app classes after R8, minSdk 26;
 - an OSV-Scanner vulnerability scan of every dependency in `android/gradle/verification-metadata.xml`.
 
-The vulnerability scan fails on HIGH or CRITICAL findings, and on findings with no severity. A suppression goes
-in `android/osv-allowlist.toml`, applies to one package only, needs a reason and an expiry date, and is ignored
-for any package that ships in the APK (release runtime classpath), so such a finding always fails. The current
-entries cover build/test toolchain artifacts (AGP, Kotlin, Robolectric) that are not packaged in the APK. Without signing secrets the release build
-is simply unsigned.
+The vulnerability scan fails on HIGH or CRITICAL findings, and on findings with no severity (unscored).
+MEDIUM and LOW findings are printed as warnings. A suppression goes in `android/osv-allowlist.toml`, applies to
+one package only and needs a reason and an expiry date. It is ignored for any package that ships in the APK
+(release runtime classpath), so a HIGH, CRITICAL or unscored finding there always fails; MEDIUM and LOW there
+still only warn. The current entries cover build/test toolchain artifacts (AGP, Kotlin, Robolectric) that are not
+packaged in the APK. Without signing secrets the release build is simply unsigned.
 
 **Dependency updates.** Dependabot (`.github/dependabot.yml`) opens weekly PRs for Gradle and GitHub Actions. It
 does **not** update `android/gradle/verification-metadata.xml`, so a Gradle PR fails CI until you regenerate the
@@ -185,7 +186,8 @@ keytool's default PKCS12 keystore uses the same password for the store and the k
 get that value.
 
 CI signs with the SDK's `apksigner` (`android/tools/sign_apk.sh`), and **Gradle never receives the secrets**.
-The release build, tests and lint run without them, and only the single signing step sees them. For a local
+The release build, tests and lint run in a job without secrets. Signing runs in a separate job on a fresh runner
+that never runs Gradle, and only one step of that job sees the secrets. For a local
 maintainer build, Gradle can also sign: it does so only when `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` are set in your environment.
 
@@ -195,7 +197,7 @@ release:
   restrict its deployments to tags matching `android-v*`. Move the four secrets into it as environment secrets.
 - Add a tag ruleset (**Settings > Rules > Rulesets**, target tags `android-v*`) that limits who may create,
   update or delete these tags.
-- Then add `environment: android-release` to the `build` job of `android-release.yml`.
+- Then add `environment: android-release` to the `sign` job of `android-release.yml`.
 
 Create and protect the environment *before* adding that line. A workflow that names a missing environment
 creates it automatically on first use, and the new environment is unprotected.
@@ -205,20 +207,21 @@ creates it automatically on first use, and the new environment is unprotected.
 1. Set `versionName` (and raise `versionCode`) in `android/app/build.gradle.kts` and merge to `main`.
 2. Tag that commit `android-v<versionName>`, for example `git tag android-v0.1.0 && git push origin android-v0.1.0`.
 
-The tag starts `.github/workflows/android-release.yml`:
-- It builds and checks the tagged commit without any secret, exactly like a dry run (tests, lint, APK checks,
-  vulnerability scan).
-- Only then does one step sign the finished APK with `apksigner`. The keystore is written to the runner's temp
-  directory and deleted right after.
-- It checks the signed APK again: `apksigner verify`, zip alignment, the same APK checks and the tag/versionName
-  match.
-- It creates a GitHub Release with the APK and its SHA-256. The release is not marked "latest", so server
-  releases keep that spot.
+The tag starts `.github/workflows/android-release.yml`. It runs three jobs:
+1. **build**, with no secrets. It builds and checks the tagged commit exactly like a dry run (tests, lint, APK
+   checks, vulnerability scan). It uploads only the unsigned APK, its R8 mapping and their checksums.
+2. **sign**, on a fresh runner. It checks out only `android/tools`, never runs Gradle, downloads the unsigned
+   APK and verifies its checksum. Then one step signs it with `apksigner` from a pinned build-tools version. The
+   keystore is written to the runner's temp directory and deleted right after. The job checks the signed APK
+   again: `apksigner verify`, zip alignment, the same APK checks and the tag/versionName match. It then uploads
+   the signed APK and its SHA-256.
+3. **publish**, which has write access but no checkout. It verifies the SHA-256 and creates a GitHub Release with
+   the APK and its checksum. The release is not marked "latest", so server releases keep that spot.
 
 Running the workflow by hand (**Run workflow**) is always a **dry run**. So is a push to `feature/**` that
-changes the workflow or `android/tools`. A dry run builds the unsigned release, runs the same checks and uploads
-the APK and checksum as a workflow artifact. It also rehearses the signing step with a throwaway key generated
-on the runner and then discards that result. It uses no secrets and publishes nothing.
+changes the workflow or `android/tools`. A dry run runs the same three jobs. **build** is real and uploads the
+unsigned APK as a workflow artifact. **sign** is a rehearsal with a throwaway key generated inside that job; its
+result is never uploaded. **publish** is skipped. A dry run uses no secrets and publishes nothing.
 
 ## Development
 
