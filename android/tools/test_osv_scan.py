@@ -106,14 +106,54 @@ class DecideTests(unittest.TestCase):
         self.assertTrue(self.decide(report(LABEL_ONLY_CRITICAL)).blocked)
 
     def test_allowlisted_by_alias_passes(self):
-        entry = osv_scan.AllowEntry("CVE-2023-0001", "com.squareup.okio:okio", "not reachable: we never call the vulnerable API", TODAY)
-        d = self.decide(report(HIGH_RUNTIME), allow=[entry])
+        # Alias matching on a finding positively classified build/test only (runtime set given, package absent).
+        build_only = package("com.google.guava:guava", "33.2.1-jre",
+                             [vuln("GHSA-xxph-c9ww-hj94", ["CVE-2026-102554"], "HIGH")],
+                             [{"ids": ["GHSA-xxph-c9ww-hj94"], "aliases": ["GHSA-xxph-c9ww-hj94"], "max_severity": "8.2"}])
+        entry = osv_scan.AllowEntry("CVE-2026-102554", "com.google.guava:guava", "build-time only, no fix yet", TODAY)
+        d = self.decide(report(build_only), allow=[entry], runtime=osv_scan.parse_gradle_dependencies(RUNTIME_DEPS))
         self.assertFalse(d.blocked)
         self.assertEqual(d.rows[0].action, "ALLOWLISTED")
 
     def test_allowlist_is_scoped_to_its_package(self):
         entry = osv_scan.AllowEntry("CVE-2023-0001", "com.google.guava:guava", "build-time only, no fix yet", TODAY)
-        self.assertTrue(self.decide(report(HIGH_RUNTIME), allow=[entry]).blocked)
+        runtime = osv_scan.parse_gradle_dependencies(RUNTIME_DEPS)
+        self.assertTrue(self.decide(report(HIGH_RUNTIME), allow=[entry], runtime=runtime).blocked)
+
+    def test_allowlist_entry_does_not_suppress_a_runtime_package(self):
+        # okio is on the release runtime classpath: an entry for it must never silence a HIGH finding.
+        entry = osv_scan.AllowEntry("CVE-2023-0001", "com.squareup.okio:okio", "claimed build-time only", TODAY)
+        d = self.decide(report(HIGH_RUNTIME), allow=[entry], runtime=osv_scan.parse_gradle_dependencies(RUNTIME_DEPS))
+        self.assertTrue(d.blocked)
+        self.assertEqual(d.rows[0].action, "BLOCK")
+        self.assertEqual(d.rows[0].scope, "runtime (ships in APK)")
+
+    def test_allowlist_entry_does_not_suppress_when_scope_unknown(self):
+        entry = osv_scan.AllowEntry("GHSA-low0-0000-0000", "com.google.guava:guava", "build-time only, no fix", TODAY)
+        crit = package("com.google.guava:guava", "31.1-jre", [vuln("GHSA-low0-0000-0000", [], "CRITICAL")],
+                       [{"ids": ["GHSA-low0-0000-0000"], "aliases": [], "max_severity": "9.8"}])
+        d = self.decide(report(crit), allow=[entry], runtime=None)
+        self.assertTrue(d.blocked)
+        self.assertEqual(d.rows[0].action, "BLOCK")
+
+    def test_allowlist_entry_still_suppresses_build_only_finding_until_expiry(self):
+        text = ('[[ignore]]\nid = "GHSA-crit-0000-0000"\npackage = "org.bouncycastle:bcprov-jdk18on"\n'
+                'reason = "build/test toolchain only"\nexpires = 2026-11-08\n')
+        runtime = osv_scan.parse_gradle_dependencies(RUNTIME_DEPS)
+        entries, problems = osv_scan.load_allowlist(text, TODAY)  # expires today: still valid
+        self.assertEqual(problems, [])
+        self.assertFalse(self.decide(report(LABEL_ONLY_CRITICAL), allow=entries, runtime=runtime).blocked)
+        entries, problems = osv_scan.load_allowlist(text, TODAY + datetime.timedelta(days=1))
+        self.assertTrue(problems)
+        self.assertTrue(self.decide(report(LABEL_ONLY_CRITICAL), allow=entries, runtime=runtime).blocked)
+
+    def test_expired_entry_blocks_again(self):
+        text = ('[[ignore]]\nid = "GHSA-crit-0000-0000"\npackage = "org.bouncycastle:bcprov-jdk18on"\n'
+                'reason = "build/test toolchain only"\nexpires = 2026-11-01\n')
+        entries, problems = osv_scan.load_allowlist(text, TODAY)
+        self.assertTrue(any("expired" in p for p in problems))
+        runtime = osv_scan.parse_gradle_dependencies(RUNTIME_DEPS)
+        self.assertTrue(self.decide(report(LABEL_ONLY_CRITICAL), allow=entries, runtime=runtime).blocked)
 
     def test_runtime_label(self):
         runtime = osv_scan.parse_gradle_dependencies(RUNTIME_DEPS)

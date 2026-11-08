@@ -2,7 +2,8 @@
 #
 # The scan fails on HIGH or CRITICAL findings (and on findings without any severity). Only add an entry when the
 # dependency cannot be upgraded yet (for example a build-time-only artifact pinned by the Android Gradle Plugin)
-# and say why it is acceptable. Every entry needs all four keys (the entry only matches that one package); an expired entry fails the scan again.
+# and say why it is acceptable. Entries are ignored for packages on releaseRuntimeClasspath (they ship in the APK)
+# and when the runtime classpath report is missing: such findings always block. Every entry needs all four keys (the entry only matches that one package); an expired entry fails the scan again.
 #
 # [[ignore]]
 # id = "GHSA-xxxx-xxxx-xxxx"        # OSV/GHSA/CVE id or alias

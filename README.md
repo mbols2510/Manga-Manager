@@ -151,7 +151,8 @@ You need JDK 17 and the Android SDK (compileSdk 37). Every push that touches `an
 - an OSV-Scanner vulnerability scan of every dependency in `android/gradle/verification-metadata.xml`.
 
 The vulnerability scan fails on HIGH or CRITICAL findings, and on findings with no severity. A suppression goes
-in `android/osv-allowlist.toml`, applies to one package only and needs a reason and an expiry date. The current
+in `android/osv-allowlist.toml`, applies to one package only, needs a reason and an expiry date, and is ignored
+for any package that ships in the APK (release runtime classpath), so such a finding always fails. The current
 entries cover build/test toolchain artifacts (AGP, Kotlin, Robolectric) that are not packaged in the APK. Without signing secrets the release build
 is simply unsigned.
 

@@ -11,8 +11,10 @@ Policy (documented in README "Android app"):
     Severity = the group's CVSS max_severity (>= 9.0 CRITICAL, >= 7.0 HIGH, >= 4.0 MEDIUM, else LOW) and, when
     OSV has no score, the advisory's database_specific.severity label.
   * MEDIUM/LOW are printed as warnings.
-  * android/osv-allowlist.toml can suppress a finding by id or alias for ONE package (group:artifact); every
-    entry needs a reason and an expiry date; an expired or incomplete entry fails the job.
+  * android/osv-allowlist.toml can suppress a finding by id or alias for ONE package (group:artifact), and ONLY
+    when that finding is positively classified "build/test only" (package absent from releaseRuntimeClasspath).
+    A finding in a package that ships in the APK, or with no runtime report to classify it, is never suppressed.
+    Every entry needs a reason and an expiry date; an expired or incomplete entry fails the job.
   * The scanner must report a non-zero package count, and any scanner error fails the job.
 
 Usage: osv_scan.py --scanner PATH --lockfile verification-metadata.xml --allowlist osv-allowlist.toml
@@ -31,6 +33,9 @@ import sys
 import tomllib
 
 BLOCKING = {"CRITICAL", "HIGH", "UNKNOWN"}
+SCOPE_RUNTIME = "runtime (ships in APK)"
+SCOPE_BUILD = "build/test only"
+SCOPE_UNKNOWN = "unknown scope"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -169,11 +174,14 @@ def load_allowlist(text: str, today: datetime.date) -> tuple[list[AllowEntry], l
 def decide(found: list[Finding], allow: list[AllowEntry], runtime: set[str] | None) -> Decision:
     rows = []
     for f in found:
-        if runtime is None:
-            scope = "unknown scope"
+        if not runtime:
+            scope = SCOPE_UNKNOWN
         else:
-            scope = "runtime (ships in APK)" if f.package in runtime else "build/test only"
-        if any(e.package == f.package and e.id in (set(f.ids) | set(f.aliases)) for e in allow):
+            scope = SCOPE_RUNTIME if f.package in runtime else SCOPE_BUILD
+        # An allowlist entry only ever suppresses a finding POSITIVELY classified build/test only. A package that
+        # ships in the APK, or whose scope could not be determined, is never suppressed (fail closed).
+        matches = any(e.package == f.package and e.id in (set(f.ids) | set(f.aliases)) for e in allow)
+        if matches and scope == SCOPE_BUILD:
             action = "ALLOWLISTED"
         elif f.severity in BLOCKING:
             action = "BLOCK"
@@ -248,6 +256,8 @@ def main(argv: list[str] | None = None) -> int:
         elif r.action == "WARN":
             print(f"::warning::OSV {f.severity}: {f.package}:{f.version} {','.join(f.ids)} [{r.scope}]")
 
+    counts = {a: sum(r.action == a for r in rows) for a in ("BLOCK", "ALLOWLISTED", "WARN")}
+    print(f"summary: blocked={counts['BLOCK']} allowlisted={counts['ALLOWLISTED']} warned={counts['WARN']}")
     for p in problems:
         print(f"::error::{p}")
     if problems or any(r.action == "BLOCK" for r in rows):
