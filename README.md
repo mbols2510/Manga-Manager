@@ -191,16 +191,22 @@ that never runs Gradle, and only one step of that job sees the secrets. For a lo
 maintainer build, Gradle can also sign: it does so only when `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`,
 `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` are set in your environment.
 
-**Recommended hardening of the tag path.** The workflow does not need any of this to run, but it narrows who can
-release:
-- Create a GitHub Environment `android-release` (**Settings > Environments**) with a required reviewer, and
-  restrict its deployments to tags matching `android-v*`. Move the four secrets into it as environment secrets.
+**Recommended hardening of the tag path.** The workflow does not need any of this to run:
 - Add a tag ruleset (**Settings > Rules > Rulesets**, target tags `android-v*`) that limits who may create,
-  update or delete these tags.
-- Then add `environment: android-release` to the `sign` job of `android-release.yml`.
+  update or delete these tags. Protect `main` with branch protection so that tagged commits are reviewed.
+- Do **not** simply add `environment:` to the `sign` job. That job also runs the throwaway-key rehearsal on every
+  dry run, so a deployment rule limited to `android-v*` tags would reject each `feature/**` or manual dry run,
+  and a required reviewer would have to approve each one.
+- If you want GitHub Environment protection (a required reviewer, deployments only from `android-v*` tags, the
+  four secrets stored as environment secrets of an `android-release` environment), first move the real signing
+  into its own tag-only job. That topology change is yours to make; the invariants test pins the current shape
+  and must be updated with it. Create and protect the environment before any workflow names it: a missing
+  environment is created automatically on first use, and the new environment is unprotected.
 
-Create and protect the environment *before* adding that line. A workflow that names a missing environment
-creates it automatically on first use, and the new environment is unprotected.
+**Residual trust.** The secrets are repository secrets, so anyone with write access to the repository can still
+reach them by editing a workflow on a branch. Only an Environment with a deployment rule closes that. The
+workflow invariants test (`android/tools/test_workflows.py`) is a guard against *accidental* weakening. It is
+not a security boundary against someone who can edit both the workflow and the test.
 
 ### Cutting a release (maintainer)
 
