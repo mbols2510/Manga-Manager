@@ -9,6 +9,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
@@ -65,6 +66,9 @@ class SettingsScreenTest {
     private var toPairing = 0
     private var reads = 0
 
+    /** What each unpair run reports (true = every step succeeded); empty means success. */
+    private val unpairResults = ArrayDeque<Boolean>()
+
     private fun string(id: Int, vararg args: Any): String = rule.activity.getString(id, *args)
 
     private fun vm(
@@ -78,6 +82,7 @@ class SettingsScreenTest {
         unpairAction = {
             unpairs++
             settings.clearAll()
+            unpairResults.removeFirstOrNull() ?: true
         },
         readNotificationStatus = {
             reads++
@@ -251,6 +256,59 @@ class SettingsScreenTest {
         rule.onAllNodesWithTag(SettingsTestTags.UNPAIR).assertCountEquals(0)
         assertEquals(1, unpairs)
         assertNull(runBlocking { settings.serverUrl() })
+    }
+
+    // ------------------------------------------------------------------ fix round 1 (I4): incomplete unpair
+
+    private fun confirmUnpair() {
+        tag(SettingsTestTags.UNPAIR).performClick()
+        waitForTag(SettingsTestTags.UNPAIR_CONFIRM)
+        rule.onNodeWithTag(SettingsTestTags.UNPAIR_CONFIRM).performClick()
+    }
+
+    @Test
+    fun incomplete_unpair_shows_error_and_try_again() {
+        unpairResults += false
+        show(vm(FakeSettingsStore("https://manga.example.com/"), status = { STATUS_ON }))
+
+        confirmUnpair()
+        waitForTag(SettingsTestTags.UNPAIR_ERROR)
+        tag(SettingsTestTags.UNPAIR_ERROR).assertIsDisplayed()
+        rule.onNodeWithText(string(R.string.settings_unpair_failed)).assertIsDisplayed()
+        tag(SettingsTestTags.UNPAIR_RETRY).assertTextEquals(string(R.string.settings_unpair_retry)).assertHasClickAction()
+        assertEquals(1, unpairs)
+        assertEquals("an incomplete unpair stays on Settings", 0, toPairing)
+    }
+
+    @Test
+    fun try_again_completes_the_unpair_and_navigates() {
+        unpairResults += false
+        unpairResults += true
+        show(vm(FakeSettingsStore("https://manga.example.com/"), status = { STATUS_ON }))
+        confirmUnpair()
+        waitForTag(SettingsTestTags.UNPAIR_RETRY)
+        assertEquals(0, toPairing)
+
+        tag(SettingsTestTags.UNPAIR_RETRY).performClick() // no second confirmation: the device is already unpaired
+        rule.waitUntil(5_000) { toPairing == 1 }
+        assertEquals(2, unpairs)
+        rule.onAllNodesWithTag(SettingsTestTags.UNPAIR_ERROR).assertCountEquals(0)
+    }
+
+    @Test
+    fun quiet_hour_rows_merge_label_and_time_for_talkback() {
+        val settings = FakeSettingsStore(
+            "https://manga.example.com/",
+            checkSettings = CheckSettings.DEFAULT.copy(quietHours = SettingsViewModel.DEFAULT_QUIET_HOURS),
+        )
+        show(vm(settings, status = { STATUS_ON }))
+        for ((t, label) in listOf(SettingsTestTags.QUIET_START to R.string.settings_quiet_start, SettingsTestTags.QUIET_END to R.string.settings_quiet_end)) {
+            val texts = tag(t).fetchSemanticsNode().config[SemanticsProperties.Text].map { it.text }
+            assertEquals("one node reads the label and then the time: $texts", 2, texts.size)
+            assertEquals(string(label), texts[0])
+            assertTrue("a time follows the label: $texts", texts[1].any { it.isDigit() })
+            tag(t).assertHasClickAction()
+        }
     }
 
     // ------------------------------------------------------------------ checks

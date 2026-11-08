@@ -12,6 +12,7 @@ import com.mbols2510.mangamanager.core.KeystoreTokenStore
 import com.mbols2510.mangamanager.core.TokenStore
 import com.mbols2510.mangamanager.data.CachingSettingsStore
 import com.mbols2510.mangamanager.data.DataStoreSettingsStore
+import com.mbols2510.mangamanager.data.PairingGeneration
 import com.mbols2510.mangamanager.data.SettingsStore
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
 import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
@@ -33,6 +34,7 @@ import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
 import com.mbols2510.mangamanager.ui.settings.SettingsViewModel
 import com.mbols2510.mangamanager.ui.settings.readNotificationStatus
 import com.mbols2510.mangamanager.ui.updates.UpdatesViewModel
+import com.mbols2510.mangamanager.work.CheckScheduler
 import com.mbols2510.mangamanager.work.CheckWorker
 import com.mbols2510.mangamanager.work.DeviceClock
 import com.mbols2510.mangamanager.work.Scheduler
@@ -52,6 +54,8 @@ class AppContainer internal constructor(
     settings: SettingsStore?,
     tokens: TokenStore?,
     imageLoader: (() -> ImageLoader)? = null,
+    notifierOverride: Notifier? = null,
+    schedulerOverride: CheckScheduler? = null,
 ) {
     constructor(context: Context) : this(context, null, null)
 
@@ -61,6 +65,9 @@ class AppContainer internal constructor(
     private val coverLoader: () -> ImageLoader = imageLoader ?: { SingletonImageLoader.get(appContext) }
 
     val authState: AuthState = AuthState()
+
+    /** Bumped first by [unpair] and on every pairing success; see [PairingGeneration]. */
+    val generation = PairingGeneration()
     /** Caches the token in memory; call [CachingTokenStore.warmUp] off the main thread at startup. */
     val tokenStore: CachingTokenStore by lazy { CachingTokenStore(tokens ?: KeystoreTokenStore(appContext)) }
 
@@ -174,10 +181,10 @@ class AppContainer internal constructor(
     /** Time source for the background check (device default time zone, read on every call). */
     val clock: Clock = DeviceClock
 
-    val notifier: Notifier by lazy { LocalNotifier(appContext) }
+    val notifier: Notifier by lazy { notifierOverride ?: LocalNotifier(appContext) }
 
     /** WorkManager is initialized on demand with `MangaApp`'s configuration (its worker factory). */
-    val scheduler: Scheduler by lazy { Scheduler(WorkManager.getInstance(appContext)) }
+    val scheduler: CheckScheduler by lazy { schedulerOverride ?: Scheduler(WorkManager.getInstance(appContext)) }
 
     /** Everything `CheckWorker` needs, for `CheckWorkerFactory`. */
     fun checkWorkerDependencies(): CheckWorker.Dependencies = CheckWorker.Dependencies(
@@ -191,6 +198,7 @@ class AppContainer internal constructor(
         notifier = notifier,
         scheduler = scheduler,
         clock = clock,
+        generation = generation,
     )
 
     /** API supplier for the repository: Offline-by-exception while the caches are cold, null when not paired. */

@@ -9,6 +9,8 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import com.mbols2510.mangamanager.data.CheckSettings
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /** What Settings and app start need from the scheduler; [Scheduler] is the WorkManager implementation (test seam). */
 interface CheckScheduler {
@@ -16,6 +18,9 @@ interface CheckScheduler {
     fun apply(settings: CheckSettings)
 
     fun cancel()
+
+    /** Cancels and waits (bounded) until WorkManager has recorded the cancellation (unpairing). */
+    suspend fun cancelAndAwait() = cancel()
 }
 
 /**
@@ -39,11 +44,23 @@ class Scheduler(private val workManager: WorkManager) : CheckScheduler {
         workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
     }
 
+    /**
+     * Waits on IO for the cancel operation, at most [CANCEL_TIMEOUT_SECONDS]; a timeout throws. A run already in
+     * progress may still finish its current step: the pairing generation keeps it from writing anything.
+     */
+    override suspend fun cancelAndAwait() {
+        val operation = workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
+        withContext(Dispatchers.IO) { operation.result.get(CANCEL_TIMEOUT_SECONDS, TimeUnit.SECONDS) }
+    }
+
     companion object {
         const val UNIQUE_WORK_NAME = "manga_update_check"
 
         /** The single retry per period comes 30 s after a failure (the worker gives up from [CheckWorker.MAX_RETRY_ATTEMPTS]). */
         const val BACKOFF_SECONDS = 30L
+
+        /** How long an unpair waits for WorkManager to record the cancellation. */
+        const val CANCEL_TIMEOUT_SECONDS = 10L
 
         fun clampInterval(minutes: Int): Int =
             minutes.coerceIn(CheckSettings.MIN_INTERVAL_MINUTES, CheckSettings.MAX_INTERVAL_MINUTES)

@@ -19,4 +19,7 @@ interface Notifier {
 
     /** Posts the single "Re-pair this device" notification. Returns false when notifications are unavailable. */
     fun notifyRepairNeeded(): Boolean
+
+    /** Removes every notification this app has posted (unpairing: titles of the old server must not stay visible). */
+    fun cancelAll()
 }

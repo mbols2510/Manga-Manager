@@ -31,6 +31,7 @@ class FakeNotifier(var available: Boolean = true) : Notifier {
     /** Every notifyUpdates call, posted or not. */
     val updateCalls = mutableListOf<List<UpdateEntity>>()
     var repairCalls = 0
+    var cancelAllCalls = 0
 
     override fun canNotify(): Boolean = available
 
@@ -50,6 +51,14 @@ class FakeNotifier(var available: Boolean = true) : Notifier {
         repairCalls++
         repairFailure?.let { throw it }
         return available
+    }
+
+    /** Called by an unpair; [onCancelAll] lets a test record the order. */
+    var onCancelAll: () -> Unit = {}
+
+    override fun cancelAll() {
+        cancelAllCalls++
+        onCancelAll()
     }
 }
 

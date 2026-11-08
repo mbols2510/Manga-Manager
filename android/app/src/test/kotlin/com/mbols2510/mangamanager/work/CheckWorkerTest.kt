@@ -14,6 +14,7 @@ import androidx.work.testing.WorkManagerTestInitHelper
 import com.mbols2510.mangamanager.data.CheckSettings
 import com.mbols2510.mangamanager.data.FakeSettingsStore
 import com.mbols2510.mangamanager.data.LocalTimeRange
+import com.mbols2510.mangamanager.data.PairingGeneration
 import com.mbols2510.mangamanager.data.db.AppDatabase
 import com.mbols2510.mangamanager.data.db.RoomUpdatesCache
 import com.mbols2510.mangamanager.data.db.SyncState
@@ -30,6 +31,7 @@ import java.time.Instant
 import java.time.LocalTime
 import java.time.ZoneId
 import kotlin.coroutines.cancellation.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
@@ -58,6 +60,7 @@ class CheckWorkerTest {
     private val auth = AuthState()
     private val notifier = FakeNotifier()
     private var paired = true
+    private val generation = PairingGeneration()
     private var warmUps = 0
 
     /** Quiet hours are evaluated in the clock's zone; Europe/Amsterdam is UTC+1 in November. */
@@ -100,6 +103,7 @@ class CheckWorkerTest {
             scheduler = scheduler,
             clock = clock,
             warmUpTimeoutMillis = warmUpTimeoutMillis,
+            generation = generation,
         )
         return TestListenableWorkerBuilder.from(app, CheckWorker::class.java)
             .setWorkerFactory(CheckWorkerFactory { deps })
@@ -421,6 +425,66 @@ class CheckWorkerTest {
         assertEquals(0, notifier.repairCalls)
         assertTrue(runBlocking { settings.needsRepair() })
         assertTrue(auth.needsRepair.value)
+    }
+
+    // ------------------------------------------------------------------ fix round 1 (I1): stale runs after an unpair
+
+    /** What an unpair does to the state the worker could write, while the worker is held inside its check. */
+    private suspend fun unpairWhileChecking() {
+        generation.bump()
+        settings.clearAll()
+        auth.clear()
+    }
+
+    /** Runs the worker until it is inside checkForChanges, unpairs, then lets the check return [result]. */
+    private fun runAcrossUnpair(repo: FakeUpdatesRepository, result: CheckResult): ListenableWorker.Result = runBlocking {
+        val inCheck = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        repo.onCheck = {
+            inCheck.complete(Unit)
+            release.await()
+        }
+        repo.next = result
+        val run = async { worker(repo).doWork() }
+        inCheck.await()
+        unpairWhileChecking()
+        release.complete(Unit)
+        run.await()
+    }
+
+    @Test
+    fun worker_started_before_unpair_writes_nothing_after_it() {
+        runBlocking { settings.setServerUrl("https://manga.example.com/") }
+        val repo = FakeUpdatesRepository()
+        repo.pending += update(1)
+        val result = runAcrossUnpair(repo, CheckResult.NewItems(listOf(update(2))))
+
+        assertEquals("a stale run ends quietly", ListenableWorker.Result.success(), result)
+        assertNull("no last successful check for the next pairing", runBlocking { settings.lastSuccessfulCheckAt() })
+        assertTrue("no notification with titles of the old server", notifier.updateCalls.isEmpty())
+        assertTrue("no rows marked", repo.marked.isEmpty())
+        assertEquals(false, runBlocking { settings.needsRepair() })
+        assertEquals(false, auth.needsRepair.value)
+    }
+
+    @Test
+    fun unauthorized_worker_stale_after_unpair_does_not_flag_repair() {
+        val result = runAcrossUnpair(FakeUpdatesRepository(), CheckResult.Unauthorized)
+
+        assertEquals(ListenableWorker.Result.success(), result)
+        assertEquals("no persisted repair flag after the unpair", false, runBlocking { settings.needsRepair() })
+        assertEquals(false, auth.needsRepair.value)
+        assertEquals("no \"pair again\" notification", 0, notifier.repairCalls)
+    }
+
+    @Test
+    fun current_generation_run_still_writes() {
+        // Control: the same flow without an unpair records the check and notifies (the guard is not "never write").
+        val repo = FakeUpdatesRepository(CheckResult.NewItems(listOf(update(3))))
+        assertEquals(ListenableWorker.Result.success(), run(repo))
+        assertEquals(now.toEpochMilli(), runBlocking { settings.lastSuccessfulCheckAt() })
+        assertEquals(1, notifier.updateCalls.size)
+        assertEquals(listOf(3L), repo.marked)
     }
 
     private fun FakeSettingsStore.setCheckSettingsBlocking(value: CheckSettings) = runBlocking { setCheckSettings(value) }

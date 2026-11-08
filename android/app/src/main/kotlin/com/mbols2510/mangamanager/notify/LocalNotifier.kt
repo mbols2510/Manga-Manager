@@ -97,6 +97,10 @@ class LocalNotifier(context: Context) : Notifier {
             .setDescription(context.getString(description))
             .build()
 
+    override fun cancelAll() {
+        manager.cancelAll()
+    }
+
     private fun post(channel: String, tag: String?, id: Int, build: () -> Notification): Boolean {
         if (!canNotify()) return false
         ensureChannels()

@@ -5,6 +5,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.ListenableWorker
 import androidx.work.WorkerFactory
 import androidx.work.WorkerParameters
+import com.mbols2510.mangamanager.data.PairingGeneration
 import com.mbols2510.mangamanager.data.SettingsStore
 import com.mbols2510.mangamanager.data.db.UpdateEntity
 import com.mbols2510.mangamanager.data.repo.AuthState
@@ -43,11 +44,13 @@ class CheckWorker(
         val settings: SettingsStore,
         val authState: AuthState,
         val notifier: Notifier,
-        val scheduler: Scheduler,
+        val scheduler: CheckScheduler,
         /** Time and time zone (quiet hours use [Clock.getZone], the device's default zone in production). */
         val clock: Clock,
         /** How long [warmUp] may take before the run gives up and retries later. */
         val warmUpTimeoutMillis: Long = WARM_UP_TIMEOUT_MILLIS,
+        /** Bumped by an unpair and by a pairing: a run started for an earlier pairing writes nothing. */
+        val generation: PairingGeneration = PairingGeneration(),
     )
 
     override suspend fun doWork(): Result {

@@ -79,6 +79,8 @@ object SettingsTestTags {
     const val UNPAIR = "settings_unpair"
     const val UNPAIR_CONFIRM = "settings_unpair_confirm"
     const val UNPAIR_CANCEL = "settings_unpair_cancel"
+    const val UNPAIR_ERROR = "settings_unpair_error"
+    const val UNPAIR_RETRY = "settings_unpair_retry"
     const val IN_EFFECT = "settings_in_effect"
     const val LAST_CHECK = "settings_last_check"
     const val WIFI_ONLY = "settings_wifi_only"

@@ -225,6 +225,8 @@
     <string name="settings_unpair_confirm_title">Unpair this device?</string>
     <string name="settings_unpair_confirm_text">This removes the token, the saved updates, cached covers and the check settings from this phone and stops background checks. The token stays valid on the server until you revoke it under Settings &gt; Devices.</string>
     <string name="settings_unpair_confirm_action">Unpair</string>
+    <string name="settings_unpair_failed">Some data could not be removed from this phone. This device no longer sends anything to the server.</string>
+    <string name="settings_unpair_retry">Try again</string>
     <string name="settings_checks_title">Background checks</string>
     <string name="settings_battery_hint">Shorter intervals use more battery. 30 minutes or more is recommended.</string>
     <string name="settings_interval_off">Off</string>

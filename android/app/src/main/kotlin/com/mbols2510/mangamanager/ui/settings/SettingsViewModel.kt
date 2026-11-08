@@ -43,6 +43,8 @@ data class SettingsUiState(
     val quietHoursRejected: Boolean = false,
     val confirmingUnpair: Boolean = false,
     val unpairing: Boolean = false,
+    /** The last unpair left some local data behind; Settings shows an error with "Try again". */
+    val unpairFailed: Boolean = false,
 ) {
     /** Background checks cannot run now: not paired or waiting for a re-pair (the choice is still stored). */
     val checksPaused: Boolean get() = serverUrl == null || needsRepair
@@ -66,7 +68,8 @@ class SettingsViewModel(
     private val authState: AuthState,
     private val scheduler: CheckScheduler,
     private val mayScheduleChecks: suspend () -> Boolean,
-    private val unpairAction: suspend () -> Unit,
+    /** Runs the whole unpair; false when a step failed (the request path is cleared either way). */
+    private val unpairAction: suspend () -> Boolean,
     private val readNotificationStatus: () -> NotificationStatus,
     private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : ViewModel() {
@@ -227,6 +230,10 @@ class SettingsViewModel(
             mutableState.update { it.copy(unpairing = false) }
             eventChannel.send(SettingsEvent.Unpaired)
         }
+    }
+
+    /** "Try again" after an incomplete unpair: re-runs the (idempotent) unpair without asking again. */
+    fun retryUnpair() {
     }
 
     /** Runs [block]; any failure except cancellation gives null. */

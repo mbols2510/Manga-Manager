@@ -1,5 +1,8 @@
 package com.mbols2510.mangamanager.ui.settings
 
+import android.Manifest
+import android.app.Application
+import android.app.NotificationManager
 import android.content.Context
 import android.graphics.Bitmap
 import androidx.test.core.app.ApplicationProvider
@@ -22,7 +25,9 @@ import com.mbols2510.mangamanager.data.db.RoomUpdatesCache
 import com.mbols2510.mangamanager.data.db.SyncState
 import com.mbols2510.mangamanager.data.db.UpdateEntity
 import com.mbols2510.mangamanager.ui.common.CoverImageLoader
+import com.mbols2510.mangamanager.notify.Notifier
 import com.mbols2510.mangamanager.ui.pairing.FakeTokenStore
+import com.mbols2510.mangamanager.work.FakeNotifier
 import com.mbols2510.mangamanager.work.CheckScheduler
 import com.mbols2510.mangamanager.work.Scheduler
 import java.io.IOException
@@ -36,6 +41,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -47,6 +53,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 
 /** Records what reaches the real [Scheduler] (and in which order). */
 class RecordingScheduler(private val delegate: CheckScheduler? = null) : CheckScheduler {
@@ -60,6 +67,11 @@ class RecordingScheduler(private val delegate: CheckScheduler? = null) : CheckSc
     override fun cancel() {
         calls += "cancel"
         delegate?.cancel()
+    }
+
+    override suspend fun cancelAndAwait() {
+        calls += "cancelAndAwait"
+        delegate?.cancelAndAwait()
     }
 }
 
@@ -102,7 +114,9 @@ class SettingsViewModelTest {
     private fun container(
         settings: SettingsStore = FakeSettingsStore(URL),
         tokens: TokenStore = FakeTokenStore().apply { token = TOKEN },
-    ): AppContainer = AppContainer(context, settings, tokens, imageLoader = { loader }).also {
+        notifier: Notifier? = null,
+        scheduler: CheckScheduler? = null,
+    ): AppContainer = AppContainer(context, settings, tokens, imageLoader = { loader }, notifierOverride = notifier, schedulerOverride = scheduler).also {
         containers += it
         runBlocking { it.warmUp() }
     }
@@ -328,7 +342,7 @@ class SettingsViewModelTest {
     fun unpair_needs_the_confirmation_step() {
         var calls = 0
         val c = container()
-        val vm = SettingsViewModel(c.settingsStore, c.authState, RecordingScheduler(), c::mayScheduleChecks, { calls++ }, { STATUS_ON }, dispatcher)
+        val vm = SettingsViewModel(c.settingsStore, c.authState, RecordingScheduler(), c::mayScheduleChecks, { calls++; true }, { STATUS_ON }, dispatcher)
         vm.unpair()
         assertEquals("unpair() without the confirmation dialog does nothing", 0, calls)
         vm.requestUnpair()
@@ -379,6 +393,10 @@ class SettingsViewModelTest {
 
         assertFalse("reports that a step failed", complete)
         assertNull("the credentials holder is never left set", c.credentials.get())
+        // Fix round 1 (I3): the in-memory caches are emptied even though the Keystore and DataStore calls threw.
+        assertNull("in-memory token cleared despite the Keystore failure", c.tokenStore.cachedToken)
+        assertNull(c.tokenStore.load())
+        assertNull("in-memory server URL cleared despite the DataStore failure", c.settingsStore.cachedServerUrl)
         assertTrue("work cancelled", active().isEmpty())
         runBlocking {
             assertTrue("rows removed after the failing steps", c.database.updateDao().allById().isEmpty())
@@ -386,6 +404,86 @@ class SettingsViewModelTest {
         }
         assertFalse("auth state cleared", c.authState.needsRepair.value)
         assertImageCachesEmpty()
+    }
+
+    // ------------------------------------------------------------------ fix round 1 (I1, I2)
+
+    @Test
+    fun pairing_success_bumps_the_generation() {
+        val c = container()
+        val before = c.generation.current()
+        runBlocking { c.scheduleAfterPairing() }
+        assertTrue("a pairing success starts a new generation", c.generation.current() > before)
+        val afterPairing = c.generation.current()
+        runBlocking { c.unpair() }
+        assertTrue("an unpair starts a new generation", c.generation.current() > afterPairing)
+    }
+
+    @Test
+    fun unpair_order_awaits_work_cancellation_before_clearing_settings() {
+        val events = mutableListOf<String>()
+        lateinit var c: AppContainer
+        val scheduler = object : CheckScheduler {
+            override fun apply(settings: CheckSettings) {
+                events += "apply"
+            }
+
+            override fun cancel() {
+                events += "cancel (not awaited)"
+            }
+
+            override suspend fun cancelAndAwait() {
+                events += "cancelAndAwait:start generation=${c.generation.current()} holder=${c.credentials.get() != null}"
+                yield() // the cancel operation completes asynchronously
+                events += "cancelAndAwait:done"
+            }
+        }
+        val tokens = FakeTokenStore().apply { token = TOKEN }
+        val recordingTokens = object : TokenStore by tokens {
+            override fun clear() {
+                events += "token.clear rows=${runBlocking { c.database.updateDao().allById().size }}"
+                tokens.clear()
+            }
+        }
+        val settings = FakeSettingsStore(URL, lastSuccessfulCheckAt = 3L)
+        val recordingSettings = object : SettingsStore by settings {
+            override suspend fun clearAll() {
+                events += "settings.clearAll"
+                settings.clearAll()
+            }
+        }
+        val notifier = FakeNotifier().apply { onCancelAll = { events += "notifier.cancelAll" } }
+        c = container(recordingSettings, recordingTokens, notifier, scheduler)
+        seedRoom(c)
+        val start = c.generation.current()
+
+        assertTrue(runBlocking { c.unpair() })
+
+        assertEquals(
+            listOf(
+                "cancelAndAwait:start generation=${start + 1} holder=false", // generation bumped, holder cleared first
+                "cancelAndAwait:done",
+                "token.clear rows=0", // the cache (rows, cursor) went before the token
+                "settings.clearAll",
+                "notifier.cancelAll",
+            ),
+            events,
+        )
+        assertFalse(c.authState.needsRepair.value)
+    }
+
+    @Test
+    fun unpair_cancels_posted_notifications() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+        val c = container() // the real LocalNotifier
+        val manager = context.getSystemService(NotificationManager::class.java)
+        assertTrue(c.notifier.notifyUpdates(listOf(entity(1), entity(2))))
+        assertTrue(c.notifier.notifyRepairNeeded())
+        assertTrue("posted before the unpair", shadowOf(manager).allNotifications.isNotEmpty())
+
+        assertTrue(runBlocking { c.unpair() })
+
+        assertTrue("no notification of the old server left", shadowOf(manager).allNotifications.isEmpty())
     }
 
     // ------------------------------------------------------------------ notifications
