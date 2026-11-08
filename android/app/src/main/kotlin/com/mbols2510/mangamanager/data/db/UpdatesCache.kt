@@ -73,7 +73,10 @@ class RoomUpdatesCache internal constructor(
     override suspend fun pendingNotifications(): List<UpdateEntity> = dao.pendingNotifications()
 
     override suspend fun clearAll() {
-        // TASK12-STUB
+        db.withTransaction {
+            dao.deleteAllUpdates()
+            dao.deleteSyncState()
+        }
     }
 
     private companion object {

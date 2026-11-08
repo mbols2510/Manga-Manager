@@ -37,7 +37,9 @@ import com.mbols2510.mangamanager.work.CheckWorker
 import com.mbols2510.mangamanager.work.DeviceClock
 import com.mbols2510.mangamanager.work.Scheduler
 import java.time.Clock
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 
@@ -130,13 +132,43 @@ class AppContainer internal constructor(
         scheduler.apply(settingsStore.checkSettings())
     }
 
-    /** TASK12-STUB: unpair is extended in the implementation commit. */
-    suspend fun unpair(): Boolean {
-        credentials.clear()
-        scheduler.cancel()
-        tokenStore.clear()
-        settingsStore.clearAll()
-        return true
+    /**
+     * Unpairs (Settings > "Unpair / pair another server"). Order: the request path stops first (credentials holder),
+     * then the periodic work is cancelled, then the token, the settings ([SettingsStore.clearAll]: server URL, repair
+     * flag, last successful check, check settings), the cached updates with the cursor and ETag (waiting for a running
+     * check), the repair state, and Coil's memory and disk caches (covers of that server).
+     *
+     * Best effort: every step runs even when an earlier one fails, and the sequence runs to the end even if the caller
+     * is cancelled (the cancellation is rethrown afterwards). Returns true when every step succeeded. Call on IO.
+     */
+    suspend fun unpair(): Boolean = withContext(NonCancellable) {
+        var complete = true
+        var cancellation: CancellationException? = null
+        suspend fun step(block: suspend () -> Unit) {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                complete = false
+                if (cancellation == null) cancellation = e
+            } catch (_: Exception) {
+                complete = false
+            }
+        }
+        step { credentials.clear() }
+        step { scheduler.cancel() }
+        step { tokenStore.clear() }
+        step { settingsStore.clearAll() }
+        step { updatesRepository.clearLocalData() }
+        step { authState.clear() }
+        step { clearCoverCaches() }
+        cancellation?.let { throw it }
+        complete
+    }
+
+    private suspend fun clearCoverCaches() = withContext(Dispatchers.IO) {
+        val loader = coverLoader()
+        loader.memoryCache?.clear()
+        loader.diskCache?.clear()
     }
 
     /** Time source for the background check (device default time zone, read on every call). */

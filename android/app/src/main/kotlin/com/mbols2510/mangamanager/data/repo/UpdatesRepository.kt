@@ -189,9 +189,7 @@ class DefaultUpdatesRepository internal constructor(
 
     override suspend fun pendingNotifications(): List<UpdateEntity> = cache.pendingNotifications()
 
-    override suspend fun clearLocalData() {
-        // TASK12-STUB
-    }
+    override suspend fun clearLocalData() = checkLock.withLock { cache.clearAll() }
 
     private suspend fun baselineWith(client: MangaApi) {
         val latest = client.latest()
