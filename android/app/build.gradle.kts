@@ -8,6 +8,22 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// Release signing (spec 7.7): keystore and passwords come ONLY from the environment, set by
+// .github/workflows/android-release.yml on tag builds. Without ANDROID_KEYSTORE_PATH the release variant stays
+// unsigned (app-release-unsigned.apk) and the build still succeeds, so CI without secrets keeps working.
+// Nothing about the keystore is ever committed.
+val releaseSigningEnv: Map<String, String?> = listOf(
+    "ANDROID_KEYSTORE_PATH",
+    "ANDROID_KEYSTORE_PASSWORD",
+    "ANDROID_KEY_ALIAS",
+    "ANDROID_KEY_PASSWORD",
+).associateWith { providers.environmentVariable(it).orNull?.takeIf(String::isNotBlank) }
+val releaseSigningEnabled = releaseSigningEnv["ANDROID_KEYSTORE_PATH"] != null
+if (releaseSigningEnabled) {
+    val missing = releaseSigningEnv.filterValues { it == null }.keys
+    check(missing.isEmpty()) { "ANDROID_KEYSTORE_PATH is set but these are missing: ${missing.joinToString()}" }
+}
+
 android {
     namespace = "com.mbols2510.mangamanager"
     compileSdk = 37
@@ -21,6 +37,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    if (releaseSigningEnabled) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseSigningEnv.getValue("ANDROID_KEYSTORE_PATH")!!)
+                storePassword = releaseSigningEnv.getValue("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = releaseSigningEnv.getValue("ANDROID_KEY_ALIAS")
+                keyPassword = releaseSigningEnv.getValue("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         getByName("debug") {
             applicationIdSuffix = ".debug"
@@ -30,6 +57,7 @@ android {
             isJniDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
+            if (releaseSigningEnabled) signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",

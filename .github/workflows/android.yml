@@ -47,6 +47,9 @@ jobs:
             echo "WRITE_VERIFICATION=false" >> "$GITHUB_ENV"
           fi
 
+      - name: Self-test of the APK check and vulnerability scan scripts (fixtures, no SDK)
+        run: python3 -m unittest discover -s tools -p 'test_*.py' -v
+
       - uses: actions/setup-java@v6.1.0
         with:
           distribution: temurin
@@ -69,6 +72,10 @@ jobs:
       - name: Build while writing dependency verification metadata
         if: env.WRITE_VERIFICATION == 'true'
         run: ./gradlew --no-daemon --continue --write-verification-metadata sha256 verifyReleaseHardening checkReleaseMergedManifest testDebugUnitTest lintDebug assembleDebug assembleRelease
+
+      - name: Release APK checks (aapt2/dexdump/apksigner) and OSV dependency vulnerability scan
+        if: env.WRITE_VERIFICATION != 'true'
+        run: tools/release_checks.sh build/release-checks
 
       - name: Upload generated verification metadata
         if: always() && env.WRITE_VERIFICATION == 'true'
