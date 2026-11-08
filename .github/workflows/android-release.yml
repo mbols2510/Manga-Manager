@@ -116,8 +116,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+    # Every security decision in this job reads the github context directly (TAG_EXPR below), never env.RELEASE:
+    # a step could rewrite an env variable for later steps through $GITHUB_ENV, but not the github context.
     env:
-      RELEASE: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v') }}
       # Exact build-tools directory for apksigner, zipalign, aapt2 and dexdump (never "the highest installed").
       BUILD_TOOLS_VERSION: "37.0.0"
     steps:
@@ -143,7 +144,7 @@ jobs:
           ls "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/zipalign"
 
       - name: Release tag must be android-vX.Y.Z
-        if: env.RELEASE == 'true'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
         env:
           TAG: ${{ github.ref_name }}
         run: |
@@ -155,7 +156,7 @@ jobs:
           echo "EXPECT_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Signing rehearsal with a throwaway key (dry run only; never uploaded)
-        if: env.RELEASE != 'true'
+        if: "!(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v'))"
         env:
           ANDROID_KEYSTORE_PASSWORD: rehearsal-only-not-a-secret
           ANDROID_KEY_PASSWORD: rehearsal-only-not-a-secret
@@ -170,7 +171,7 @@ jobs:
           rm -f "$RUNNER_TEMP/rehearsal.keystore"
 
       - name: Sign the release APK with apksigner (the only step with secrets)
-        if: env.RELEASE == 'true'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -183,11 +184,11 @@ jobs:
         run: rm -f "$RUNNER_TEMP/release.keystore" "$RUNNER_TEMP/rehearsal.keystore"
 
       - name: APK checks on the signed APK (release)
-        if: env.RELEASE == 'true'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
         run: python3 android/tools/apk_check.py --apk signed/app-release.apk --mapping unsigned/mapping.txt --build-tools "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" --expect-signed --expect-version "$EXPECT_VERSION"
 
       - name: APK checks on the rehearsal-signed APK (dry run)
-        if: env.RELEASE != 'true'
+        if: "!(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v'))"
         run: python3 android/tools/apk_check.py --apk signed/app-release.apk --mapping unsigned/mapping.txt --build-tools "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" --expect-signed
 
       - name: SHA-256 of the signed APK
@@ -195,7 +196,7 @@ jobs:
         run: sha256sum app-release.apk > app-release.apk.sha256 && cat app-release.apk.sha256
 
       - name: Upload the signed APK and its SHA-256 (release)
-        if: env.RELEASE == 'true'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
         uses: actions/upload-artifact@v7.0.2
         with:
           name: android-release

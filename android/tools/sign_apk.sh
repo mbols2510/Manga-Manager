@@ -50,12 +50,16 @@ rm -f "$ks"
 rm -f "$out.idsig"
 
 echo "== apksigner verify"
+# Capture everything first, print the diagnostics in every case, and only then decide (fail closed).
 verify_rc=0
 verify_out=$("$bt/apksigner" verify --print-certs --verbose "$out" 2>&1) || verify_rc=$?
-printf '%s\n' "$verify_out" | grep -E '^(Verifies|Verified using|Number of signers|.*Signer.*certificate (DN|SHA-256 digest))'
-printf '%s\n' "$verify_out" | grep '^WARNING' || echo "apksigner: no warnings"
-if [ "$verify_rc" -ne 0 ] || printf '%s\n' "$verify_out" | grep -q '^ERROR'; then
-  printf '%s\n' "$verify_out" | grep -E '^(ERROR|DOES NOT VERIFY)' || true
+summary=$(printf '%s\n' "$verify_out" | grep -E '^(Verifies|DOES NOT VERIFY|Verified using|Number of signers|.*Signer.*certificate (DN|SHA-256 digest))' || true)
+warnings=$(printf '%s\n' "$verify_out" | grep '^WARNING' || true)
+errors=$(printf '%s\n' "$verify_out" | grep '^ERROR' || true)
+printf '%s\n' "${summary:-apksigner: no verification summary}"
+printf '%s\n' "${warnings:-apksigner: no warnings}"
+if [ -n "$errors" ]; then printf '%s\n' "$errors"; fi
+if [ "$verify_rc" -ne 0 ] || [ -n "$errors" ]; then
   echo "::error::apksigner verify failed (exit $verify_rc) or reported errors"
   exit 1
 fi

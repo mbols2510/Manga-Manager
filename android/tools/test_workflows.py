@@ -535,8 +535,9 @@ def sign_script_problems(text):
         p.append("sign_apk.sh: must use exactly $ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION (no version picking)")
     if "zipalign" not in text or "verify --print-certs" not in text:
         p.append("sign_apk.sh: must check alignment and verify the signature")
-    if "grep -q '^ERROR'" not in text or "grep '^WARNING'" not in text:
-        p.append("sign_apk.sh: must print apksigner WARNING lines and fail on ERROR lines")
+    if "grep '^ERROR'" not in text or "grep '^WARNING'" not in text or \
+            'if [ "$verify_rc" -ne 0 ] || [ -n "$errors" ]; then' not in text:
+        p.append("sign_apk.sh: must print apksigner WARNING/ERROR lines and fail on a non-zero exit or any ERROR line")
     return p
 
 
@@ -787,7 +788,9 @@ SIGN_SCRIPT_MUTATIONS = {
     "build-tools picked by sort -V": lambda t: t.replace(
         'bt="$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION"', 'bt=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)'),
     "apksigner warnings dropped": lambda t: t.replace("grep '^WARNING'", "grep -v '^WARNING'"),
-    "apksigner errors ignored": lambda t: t.replace("grep -q '^ERROR'", "grep -q '^NOTHING'"),
+    "apksigner errors ignored": lambda t: t.replace("grep '^ERROR'", "grep '^NOTHING'"),
+    "apksigner ERROR lines do not fail": lambda t: t.replace(
+        'if [ "$verify_rc" -ne 0 ] || [ -n "$errors" ]; then', 'if [ "$verify_rc" -ne 0 ]; then'),
 }
 
 NONRELEASE_MUTATIONS = {
