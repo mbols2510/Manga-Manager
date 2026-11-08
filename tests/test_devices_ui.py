@@ -117,3 +117,74 @@ def test_docs_check_fails_when_a_row_is_removed(app_ctx, url):
     assert len(kept) == len(docs.splitlines()) - 1
     missing = _missing_doc_rows(app, "\n".join(kept))
     assert [m[1] for m in missing] == [url]
+
+
+def create_pairing(app, base_url="http://localhost"):
+    from tests.test_bearer_auth import ADMIN_PASSWORD
+    c = app.test_client()
+    # Log in on the same host: the test client scopes the session cookie to it.
+    assert c.post("/login", data={"username": "admin", "password": ADMIN_PASSWORD},
+                  base_url=base_url).status_code == 302
+    r = c.post("/api/v1/devices", json={"name": "Pixel"}, base_url=base_url)
+    assert r.status_code == 201
+    body = r.get_json()
+    return decode_pairing(body["pairing"])["url"], body.get("warning")
+
+
+def test_public_url_wins_over_request_host(app_ctx):
+    # Behind an HTTPS reverse proxy without web.behind_proxy the request looks like http://internal-name.
+    app, ctx = app_ctx
+    ctx.cfg.web_public_url = "https://manga.example.com/"
+    url, warning = create_pairing(app, base_url="http://manga-manager:5000")
+    assert url == "https://manga.example.com"
+    assert warning is None
+
+
+def test_public_url_keeps_a_sub_path(app_ctx):
+    app, ctx = app_ctx
+    ctx.cfg.web_public_url = "https://example.com/manga"
+    assert create_pairing(app)[0] == "https://example.com/manga"
+
+
+def test_http_to_public_host_returns_a_warning(app_ctx):
+    app, _ = app_ctx
+    url, warning = create_pairing(app, base_url="http://manga.example.com")
+    assert url == "http://manga.example.com"
+    assert warning and "web.public_url" in warning and "behind_proxy" in warning
+
+
+def test_https_request_has_no_warning(app_ctx):
+    app, _ = app_ctx
+    url, warning = create_pairing(app, base_url="https://manga.example.com")
+    assert url == "https://manga.example.com" and warning is None
+
+
+@pytest.mark.parametrize("base", ["http://192.168.1.5:5000", "http://10.0.0.2", "http://172.20.1.1",
+                                  "http://100.64.0.9", "http://169.254.1.1", "http://nas.local:8080",
+                                  "http://localhost", "http://127.0.0.1:5000", "http://[::1]:5000",
+                                  "http://[fd12::1]"])
+def test_http_to_private_host_has_no_warning(app_ctx, base):
+    app, _ = app_ctx
+    url, warning = create_pairing(app, base_url=base)
+    assert url == base and warning is None
+
+
+@pytest.mark.parametrize("host,private", [
+    ("192.168.1.5", True), ("10.1.2.3", True), ("172.16.0.1", True), ("172.32.0.1", False),
+    ("100.64.0.1", True), ("100.128.0.1", False), ("169.254.9.9", True), ("127.0.0.1", True),
+    ("localhost", True), ("nas.local", True), (".local", False), ("nas.local.", False), ("8.8.8.8", False),
+    ("example.com", False), ("::1", True), ("fe80::1", True), ("fd00::1", True), ("2001:db8::1", False),
+    ("::ffff:192.168.1.1", True), ("010.0.0.1", False), ("", False),
+])
+def test_is_private_host_matches_the_app_rules(host, private):
+    from manga_manager.v1_devices_routes import is_private_host
+    assert is_private_host(host) is private
+
+
+def test_devices_js_shows_the_warning_escaped():
+    js = (ROOT / "manga_manager" / "static" / "devices.js").read_text()
+    assert "body.warning" in js
+    # Server text goes in with textContent, never innerHTML.
+    assert re.search(r"dev-url-warn'\)\.textContent\s*=\s*body\.warning", js)
+    html = (ROOT / "manga_manager" / "templates" / "settings.html").read_text()
+    assert 'id="dev-url-warn"' in html

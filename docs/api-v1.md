@@ -13,7 +13,7 @@ logged-in administrator session cookie. Device tokens cannot manage devices.
 
 | Method | URL | Purpose |
 | --- | --- | --- |
-| `POST` | `/api/v1/devices` | Body `{"name": "Pixel 8"}` (1 to 64 printable characters). Returns `201` with `id`, `token`, `pairing` and `qr_svg`. |
+| `POST` | `/api/v1/devices` | Body `{"name": "Pixel 8"}` (1 to 64 printable characters). Returns `201` with `id`, `token`, `pairing` and `qr_svg`, plus `warning` (a sentence for the administrator) when the pairing URL is plain `http://` to a public host. |
 | `GET` | `/api/v1/devices` | Lists devices (`id`, `name`, `user`, `created_at`, `last_seen`, `revoked_at`), revoked ones included. Never returns tokens. |
 | `DELETE` | `/api/v1/devices/<id>` | Revokes a device (`204`; `404` if unknown or already revoked). |
 
@@ -29,8 +29,14 @@ server (the token never goes to a third-party service).
 {"v":1,"url":"http://192.168.1.5:5000","token":"..."}
 ```
 
-`url` is the base URL the administrator used to reach the dashboard. Treat the code and the QR like a
-password: they contain the access token.
+`url` is `web.public_url` when it is set (trailing slash removed), otherwise the base URL of the request that
+created the device, as the server sees it. Behind a reverse proxy that terminates TLS, set
+`web.behind_proxy: true` (so the server trusts the proxy's `X-Forwarded-Proto`/`X-Forwarded-Host`) and/or
+`web.public_url`; otherwise the code can carry the proxy's internal plain-http address, which the app refuses.
+When the chosen URL is `http://` to a host that is not private, the response carries a `warning` and the
+Devices card shows it. "Private" follows the app's rule: `localhost`, `*.local`, loopback, RFC 1918,
+`100.64.0.0/10`, `169.254.0.0/16`, and for IPv6 loopback, `fc00::/7` and `fe80::/10`. Treat the code and the
+QR like a password: they contain the access token.
 
 ### Using the token
 

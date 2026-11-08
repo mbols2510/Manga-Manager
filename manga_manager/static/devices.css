@@ -5,6 +5,7 @@
 .dev-msg.ok { color: var(--ok); font-weight: 700; }
 .dev-pair { margin: 12px 0 18px; padding: 14px; border: 1px dashed var(--warn); border-radius: 10px; }
 .dev-warn { margin: 0 0 12px; color: var(--warn); }
+.dev-url-warn { margin: 0 0 12px; padding: 10px 12px; border-radius: 8px; border: 2px solid var(--warn); color: var(--warn); font-weight: 700; }
 .dev-pair-body { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
 .dev-pair-body .field { flex: 1 1 260px; min-width: 0; }
 .dev-pair-body input { width: 100%; font-family: ui-monospace, monospace; font-size: .75rem; box-sizing: border-box; }

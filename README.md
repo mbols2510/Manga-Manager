@@ -120,6 +120,11 @@ debuggable (any computer with USB debugging can read its data) and it exports te
    **Create device**.
 2. Copy the pairing code (it starts with `mm1.`) and paste it into the app.
 
+The code carries the server address. It is `web.public_url` when that is set, otherwise the address your browser
+used. **Behind a reverse proxy** (Caddy, Traefik, nginx, Cloudflare) set `web.behind_proxy: true` and/or
+`web.public_url` (e.g. `https://manga.example.com`), or the code can contain a plain-http address that the app
+refuses. The Devices card warns when the code points at plain HTTP on a public host.
+
 The app has no QR scanner. To move the code from the QR to your phone, read the QR with any camera app and copy
 the text. The code contains the access token, so treat it like a password. It is shown only once.
 
