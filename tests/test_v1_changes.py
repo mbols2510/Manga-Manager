@@ -179,3 +179,33 @@ def test_works_with_auth_disabled(db, tmp_path, monkeypatch):
     c = app.test_client()
     assert [i["id"] for i in c.get("/api/v1/changes").json["items"]] == ids
     assert c.get("/api/v1/changes/latest").json == {"cursor": ids[-1]}
+
+
+@pytest.mark.parametrize("mature,blur,category,expected", [
+    ([], ["Hentai"], "hentai", True),        # blur-only category hides covers, so it is sensitive (spec 7.5)
+    (["Adult"], [], "Adult", True),          # mature-only stays sensitive
+    (["Adult"], ["Hentai"], "Manga", False),  # neither
+])
+def test_sensitive_uses_mature_and_blur_categories_on_both_endpoints(db, tmp_path, monkeypatch,
+                                                                      mature, blur, category, expected):
+    app, ctx = build_app(db, tmp_path, monkeypatch=monkeypatch)
+    hd = bearer(DeviceStore(db).create("Pixel 8", "admin")[1])
+    ctx.cfg.web_mature_categories = mature
+    ctx.cfg.web_blur_categories = blur
+    h = History(db)
+    h.add_update(title="A", category=category, is_new=True, chapters=["1"])
+    v1 = get(app, hd).json["items"]
+    old = app.test_client().get("/api/updates", headers=hd).json["items"]
+    assert [i["sensitive"] for i in v1] == [expected]
+    assert [i["sensitive"] for i in old] == [expected]
+
+
+def test_is_sensitive_category_is_none_safe_and_case_insensitive():
+    from manga_manager.config import Config
+    from manga_manager.web import is_sensitive_category
+    cfg = Config(web_mature_categories=["Adult"], web_blur_categories=["HENTAI"])
+    assert is_sensitive_category(cfg, None) is False
+    assert is_sensitive_category(cfg, "") is False
+    assert is_sensitive_category(cfg, "adult") is True
+    assert is_sensitive_category(cfg, "Hentai") is True
+    assert is_sensitive_category(cfg, "Manga") is False

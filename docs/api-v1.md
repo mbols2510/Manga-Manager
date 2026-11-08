@@ -91,8 +91,9 @@ Updates with `id > since`, oldest first. `since` defaults to `0` and must be a n
 
 * `next_cursor` is the id of the last item returned, or `since` when there are none. Store it and pass it as
   the next `since`. When `has_more` is true, call again straight away.
-* `sensitive` is true when the category is in `web.mature_categories`; clients should hide those thumbnails
-  and titles by default.
+* `sensitive` is true when the category (case-insensitive) is in `web.mature_categories` or
+  `web.blur_categories`. Clients should hide those thumbnails and keep their titles out of notifications (the
+  Android app blurs the covers and posts a generic notification text for them).
 * **ETag and 304.** Every `200` has an `ETag` derived from `since` and the newest id. When `since` equals the
   newest id and the request carries a matching `If-None-Match`, the answer is `304` with no body.
 * **410 Gone.** `{"error": "cursor too old or reset"}` when `since` is above the newest id (the database was

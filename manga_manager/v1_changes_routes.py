@@ -62,14 +62,13 @@ def build_blueprint(cfg: Config, history: History, decorate: Callable[[dict], di
 
         rows = history.changes_since(since, limit + 1)
         has_more = len(rows) > limit
-        mature = {c.lower() for c in cfg.web_mature_categories}
         items = []
         for row in rows[:limit]:
             decorate(row)
             items.append({
                 "id": row["id"], "title": row["title"], "category": row["category"], "is_new": row["is_new"],
                 "chapters": row["chapters"], "created_at": row["created_at"], "thumbnail": row["thumbnail"],
-                "kavita_url": row["kavita_url"], "sensitive": (row["category"] or "").lower() in mature,
+                "kavita_url": row["kavita_url"], "sensitive": row["sensitive"],
             })
         resp = jsonify({"items": items, "next_cursor": items[-1]["id"] if items else since,
                         "has_more": has_more})

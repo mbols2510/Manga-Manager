@@ -62,6 +62,13 @@ ALIAS_MAX = 300           # longest title accepted for an alias (#12)
 SUGGESTIONS_TTL = 600     # seconds the Suwayomi / Kavita title lists for the alias form are kept
 
 
+def is_sensitive_category(cfg: Config, category: str | None) -> bool:
+    """True for a mature or blurred category (case-insensitive): its covers are hidden (spec 7.5)."""
+    if not category:
+        return False
+    return category.lower() in {c.lower() for c in (*cfg.web_mature_categories, *cfg.web_blur_categories)}
+
+
 def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Scheduler | None,
                limiter: LoginLimiter | None = None,
                titles: Callable[[], dict[str, list[str]]] | None = None,
@@ -120,6 +127,8 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         item["title"] = cfg.display_title(item["title"])
         item["kavita_url"] = kavita_link(item)
         item["thumbnail"] = f"thumb/{item['suwayomi_id']}.png" if item.get("suwayomi_id") else None
+        # One rule for both routes: the Android app blurs these covers and keeps them out of notifications.
+        item["sensitive"] = is_sensitive_category(cfg, item.get("category"))
         return item
 
     # ------------------------------------------------------------ aliases (#12)
@@ -332,11 +341,9 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
             kind=request.args.get("kind") or None,
             query=query, also_titles=also,
         )
-        # Same rule as /api/v1/changes: the Android feed is also filled from here and blurs these covers (spec 7.5).
-        mature = {c.lower() for c in cfg.web_mature_categories}
+        # decorate_update adds `sensitive` too: the Android feed is also filled from here (spec 7.5).
         for item in items:
             decorate_update(item)
-            item["sensitive"] = (item.get("category") or "").lower() in mature
         return jsonify({"items": items, "total": total, "offset": offset, "limit": limit})
 
     @app.get("/api/aliases")
