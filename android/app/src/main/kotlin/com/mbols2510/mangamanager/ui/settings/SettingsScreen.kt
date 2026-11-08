@@ -10,6 +10,7 @@ import android.provider.Settings
 import android.text.format.DateFormat
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -151,6 +152,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onNavigateToPairing: () -> Unit
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.semantics { heading() },
         )
+        if (state.unpairFailed) UnpairFailedBanner(onRetry = viewModel::retryUnpair, enabled = !state.unpairing)
         if (state.needsRepair) RepairCard(onRepair = onNavigateToPairing)
         ServerSection(state, onUnpair = viewModel::requestUnpair)
         HorizontalDivider()
@@ -218,11 +220,33 @@ private fun RepairCard(onRepair: () -> Unit) {
     }
 }
 
+/** An unpair step failed: the device is already cut off (holder cleared); the user can run the cleanup again. */
+@Composable
+private fun UnpairFailedBanner(onRetry: () -> Unit, enabled: Boolean) {
+    Surface(
+        color = MaterialTheme.colorScheme.errorContainer,
+        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(SettingsTestTags.UNPAIR_ERROR),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.settings_unpair_failed), style = MaterialTheme.typography.bodyMedium)
+            Button(onClick = onRetry, enabled = enabled, modifier = Modifier.testTag(SettingsTestTags.UNPAIR_RETRY)) {
+                Text(stringResource(R.string.settings_unpair_retry))
+            }
+        }
+    }
+}
+
 @Composable
 private fun ServerSection(state: SettingsUiState, onUnpair: () -> Unit) {
     SectionTitle(stringResource(R.string.settings_server_title))
     val url = state.serverUrl
-    if (url == null) {
+    if (!state.loaded) {
+        // Nothing until the stored settings were read once: no "Not paired" flash while the cache is cold.
+    } else if (url == null) {
         Text(stringResource(R.string.settings_server_none), style = MaterialTheme.typography.bodyLarge)
     } else {
         // Plain text, no field: the URL cannot be edited while a token is stored (ruling 25).
@@ -309,6 +333,7 @@ private fun ChecksSection(
     }
     val interval = check.intervalMinutes
     val inEffect = when {
+        !state.loaded -> ""
         state.checksPaused -> stringResource(R.string.settings_in_effect_paused)
         interval == null -> stringResource(R.string.settings_in_effect_off)
         check.wifiOnly -> stringResource(R.string.settings_in_effect_every_wifi, intervalLabel(interval))
@@ -399,14 +424,20 @@ private fun formatTime(time: LocalTime): String {
     return DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, skeleton), locale).format(time)
 }
 
+/** One clickable row, so TalkBack reads the label and the time together ("Start, 22:00") and opens the picker. */
 @Composable
 private fun TimeRow(label: String, time: LocalTime, onClick: () -> Unit, tag: String) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(start = 16.dp, end = 12.dp)
+            .testTag(tag),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(label, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
-        TextButton(onClick = onClick, modifier = Modifier.testTag(tag)) { Text(formatTime(time)) }
+        Text(formatTime(time), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
     }
 }
 

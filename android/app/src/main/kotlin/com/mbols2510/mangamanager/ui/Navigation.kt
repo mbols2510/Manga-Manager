@@ -82,12 +82,7 @@ fun AppNavHost(
     val currentRoute = backStackEntry?.destination?.route
 
     LaunchedEffect(repair, currentRoute) {
-        if (repair && currentRoute != null && currentRoute != Routes.PAIRING) {
-            navController.navigate(Routes.PAIRING) {
-                popUpTo(navController.graph.id) { inclusive = true }
-                launchSingleTop = true
-            }
-        }
+        if (repair && currentRoute != null && currentRoute != Routes.PAIRING) navController.replaceStackWithPairing()
     }
 
     Scaffold(
@@ -112,15 +107,23 @@ fun AppNavHost(
             composable(Routes.JOBS) { jobsScreen() }
             composable(Routes.SETTINGS) {
                 // Unpair or "Re-pair this device": the whole paired back stack goes, pairing becomes the root.
-                settingsScreen {
-                    navController.navigate(Routes.PAIRING) {
-                        popUpTo(navController.graph.id) { inclusive = true }
-                        launchSingleTop = true
-                    }
-                }
+                settingsScreen { navController.replaceStackWithPairing() }
             }
         }
     }
+}
+
+/**
+ * Pairing becomes the only destination: the paired back stack is popped AND the tab states the bottom bar saved
+ * (`saveState`) are dropped, so the screens of the old pairing (their ViewModels: feed, pending Kavita scans, jobs,
+ * settings) are cleared and the next pairing starts with fresh ones instead of restoring them.
+ */
+private fun NavHostController.replaceStackWithPairing() {
+    navigate(Routes.PAIRING) {
+        popUpTo(graph.id) { inclusive = true }
+        launchSingleTop = true
+    }
+    topLevelDestinations.forEach { clearBackStack(it.route) }
 }
 
 @Composable

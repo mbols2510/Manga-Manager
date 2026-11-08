@@ -218,22 +218,30 @@ class SettingsViewModel(
     fun dismissUnpair() = mutableState.update { it.copy(confirmingUnpair = false) }
 
     /**
-     * Runs the unpair flow, only while the confirmation dialog is showing ([requestUnpair]). Afterwards
-     * [SettingsEvent.Unpaired] is sent even when a cleanup step failed: the request path is cleared first, so the
-     * device is unpaired either way.
+     * Runs the unpair flow, only while the confirmation dialog is showing ([requestUnpair]). When every step succeeded,
+     * [SettingsEvent.Unpaired] is sent (the screen goes to pairing). When a step failed, the screen stays on Settings
+     * with [SettingsUiState.unpairFailed] and [retryUnpair]; the request path is cleared first, so nothing reaches any
+     * server meanwhile.
      */
     fun unpair() {
-        if (!state.value.confirmingUnpair || unpairJob?.isActive == true) return
-        mutableState.update { it.copy(confirmingUnpair = false, unpairing = true) }
-        unpairJob = viewModelScope.launch {
-            guarded { withContext(io) { unpairAction() } }
-            mutableState.update { it.copy(unpairing = false) }
-            eventChannel.send(SettingsEvent.Unpaired)
-        }
+        if (!state.value.confirmingUnpair) return
+        runUnpair()
     }
 
     /** "Try again" after an incomplete unpair: re-runs the (idempotent) unpair without asking again. */
     fun retryUnpair() {
+        if (!state.value.unpairFailed) return
+        runUnpair()
+    }
+
+    private fun runUnpair() {
+        if (unpairJob?.isActive == true) return
+        mutableState.update { it.copy(confirmingUnpair = false, unpairing = true, unpairFailed = false) }
+        unpairJob = viewModelScope.launch {
+            val complete = guarded { withContext(io) { unpairAction() } } == true
+            mutableState.update { it.copy(unpairing = false, unpairFailed = !complete) }
+            if (complete) eventChannel.send(SettingsEvent.Unpaired)
+        }
     }
 
     /** Runs [block]; any failure except cancellation gives null. */

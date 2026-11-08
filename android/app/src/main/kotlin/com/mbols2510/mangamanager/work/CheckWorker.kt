@@ -54,6 +54,9 @@ class CheckWorker(
     )
 
     override suspend fun doWork(): Result {
+        // The pairing this run works for: an unpair (or a new pairing) while it runs makes it stale, and a stale run
+        // writes nothing (no repair flag, no "last check", no notification, no marked rows).
+        val generation = deps.generation.current()
         // A stuck warm-up (Keystore, storage) must not hold the worker: give up and let the backoff retry.
         val warmed = try {
             withTimeoutOrNull(deps.warmUpTimeoutMillis) { deps.warmUp() } != null
@@ -84,62 +87,76 @@ class CheckWorker(
         val result = deps.repository.checkForChanges()
         // A stopped run can surface as Offline (a cancelled OkHttp call is an IOException): never count it.
         currentCoroutineContext().ensureActive()
+        if (deps.generation.current() != generation) return Result.success() // unpaired meanwhile: stale run
 
         return when (result) {
             CheckResult.NoChange -> {
-                deps.settings.setLastSuccessfulCheckAt(deps.clock.millis())
-                decide(pending, inQuietHours)
+                if (!recordSuccess(generation)) return Result.success()
+                decide(pending, inQuietHours, generation)
                 Result.success()
             }
             is CheckResult.NewItems -> {
-                deps.settings.setLastSuccessfulCheckAt(deps.clock.millis())
-                decide((pending + result.items).distinctBy { it.id }, inQuietHours)
+                if (!recordSuccess(generation)) return Result.success()
+                decide((pending + result.items).distinctBy { it.id }, inQuietHours, generation)
                 Result.success()
             }
             CheckResult.Offline -> {
-                decide(pending, inQuietHours)
+                decide(pending, inQuietHours, generation)
                 retryOrGiveUp()
             }
             CheckResult.Unauthorized -> {
-                // First the state the app needs to open on the pairing screen, then the best-effort notice.
-                val alreadyFlagged = deps.settings.needsRepair()
-                deps.settings.setNeedsRepair(true)
-                deps.authState.markUnauthorized()
-                withContext(NonCancellable) {
-                    if (!alreadyFlagged) {
-                        try {
-                            deps.notifier.notifyRepairNeeded()
-                        } catch (_: RuntimeException) {
-                            false // the app still opens on the pairing screen; nothing depends on the notice
+                // First the state the app needs to open on the pairing screen, then the best-effort notice; all of it
+                // only for the pairing this run started with (a stale 401 is the unpair itself, not a revoked token).
+                val current = withContext(NonCancellable) {
+                    deps.generation.ifCurrent(generation) {
+                        val alreadyFlagged = deps.settings.needsRepair()
+                        deps.settings.setNeedsRepair(true)
+                        deps.authState.markUnauthorized()
+                        if (!alreadyFlagged) {
+                            try {
+                                deps.notifier.notifyRepairNeeded()
+                            } catch (_: RuntimeException) {
+                                false // the app still opens on the pairing screen; nothing depends on the notice
+                            }
                         }
-                    }
+                        Unit
+                    } != null
+                }
+                if (current) {
                     // Last: cancelling the unique work also stops this run. Nothing reschedules until a new pairing.
-                    deps.scheduler.cancel()
+                    withContext(NonCancellable) { deps.scheduler.cancel() }
                 }
                 Result.success()
             }
         }
     }
 
+    /** Records the successful check for [generation]; false when the run became stale (nothing written). */
+    private suspend fun recordSuccess(generation: Long): Boolean =
+        deps.generation.ifCurrent(generation) { deps.settings.setLastSuccessfulCheckAt(deps.clock.millis()) } != null
+
     /** Silent retry with exponential backoff, but not forever: the next period tries again anyway. */
     private fun retryOrGiveUp(): Result =
         if (runAttemptCount >= MAX_RETRY_ATTEMPTS) Result.success() else Result.retry()
 
     /** One notification for all [items] unless quiet hours suppress it; either way the decision is taken. */
-    private suspend fun decide(items: List<UpdateEntity>, inQuietHours: Boolean) {
+    private suspend fun decide(items: List<UpdateEntity>, inQuietHours: Boolean, generation: Long) {
         if (items.isEmpty()) return
         // Posting and marking belong together: a stop in between would only re-post once (same tag, no re-alert).
+        // Both only for the pairing this run started with: an unpair must not be followed by old-server titles.
         withContext(NonCancellable) {
-            if (!inQuietHours) {
-                // false ("notifications unavailable") is a decision; an exception is not: the items stay pending
-                // and the next period's check tries again (ruling 22).
-                try {
-                    deps.notifier.notifyUpdates(items)
-                } catch (_: RuntimeException) {
-                    return@withContext
+            deps.generation.ifCurrent(generation) {
+                if (!inQuietHours) {
+                    // false ("notifications unavailable") is a decision; an exception is not: the items stay pending
+                    // and the next period's check tries again (ruling 22).
+                    try {
+                        deps.notifier.notifyUpdates(items)
+                    } catch (_: RuntimeException) {
+                        return@ifCurrent
+                    }
                 }
+                deps.repository.markNotified(items.map { it.id })
             }
-            deps.repository.markNotified(items.map { it.id })
         }
     }
 

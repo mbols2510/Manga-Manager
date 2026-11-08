@@ -252,9 +252,13 @@ class CachingSettingsStore(private val delegate: SettingsStore) : SettingsStore 
 
     override suspend fun setNotificationPermissionRequested() = delegate.setNotificationPermissionRequested()
 
+    /** The cached URL is dropped even when the DataStore call throws (the exception still propagates). */
     override suspend fun clearAll() {
-        delegate.clearAll()
-        put(null)
+        try {
+            delegate.clearAll()
+        } finally {
+            put(null)
+        }
     }
 
     private fun put(value: String?) = synchronized(lock) {

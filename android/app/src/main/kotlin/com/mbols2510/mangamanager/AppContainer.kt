@@ -134,19 +134,27 @@ class AppContainer internal constructor(
     suspend fun mayScheduleChecks(): Boolean =
         credentials.get() != null && !authState.needsRepair.value && !settingsStore.needsRepair()
 
-    /** After a successful (re-)pairing, which has cleared the repair flag: schedule the periodic check. Call on IO. */
+    /**
+     * After a successful (re-)pairing, which has cleared the repair flag: starts a new pairing generation (a run of
+     * the old pairing still in flight writes nothing) and schedules the periodic check. Call on IO.
+     */
     suspend fun scheduleAfterPairing() {
+        generation.bump()
         scheduler.apply(settingsStore.checkSettings())
     }
 
     /**
-     * Unpairs (Settings > "Unpair / pair another server"). Order: the request path stops first (credentials holder),
-     * then the periodic work is cancelled, then the token, the settings ([SettingsStore.clearAll]: server URL, repair
-     * flag, last successful check, check settings), the cached updates with the cursor and ETag (waiting for a running
-     * check), the repair state, and Coil's memory and disk caches (covers of that server).
+     * Unpairs (Settings > "Unpair / pair another server"). Order:
+     * 1. a new pairing [generation], so a check already running writes nothing from now on;
+     * 2. the credentials holder (the request path stops: nothing more reaches the old server);
+     * 3. the periodic work, cancelled and AWAITED (bounded);
+     * 4. the cached updates with the cursor and ETag (takes the check lock, so a check in flight finishes first);
+     * 5. the token; 6. the settings ([SettingsStore.clearAll]: server URL, repair flag, last successful check, check
+     *    settings); 7. the repair state; 8. every posted notification; 9. Coil's memory and disk caches (covers).
      *
      * Best effort: every step runs even when an earlier one fails, and the sequence runs to the end even if the caller
-     * is cancelled (the cancellation is rethrown afterwards). Returns true when every step succeeded. Call on IO.
+     * is cancelled (the cancellation is rethrown afterwards). Idempotent, so "Try again" simply runs it again.
+     * Returns true when every step succeeded. Call on IO.
      */
     suspend fun unpair(): Boolean = withContext(NonCancellable) {
         var complete = true
@@ -161,12 +169,14 @@ class AppContainer internal constructor(
                 complete = false
             }
         }
+        step { generation.bump() }
         step { credentials.clear() }
-        step { scheduler.cancel() }
+        step { scheduler.cancelAndAwait() }
+        step { updatesRepository.clearLocalData() }
         step { tokenStore.clear() }
         step { settingsStore.clearAll() }
-        step { updatesRepository.clearLocalData() }
         step { authState.clear() }
+        step { notifier.cancelAll() }
         step { clearCoverCaches() }
         cancellation?.let { throw it }
         complete

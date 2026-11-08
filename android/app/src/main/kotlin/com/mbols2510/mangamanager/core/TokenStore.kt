@@ -53,9 +53,13 @@ class CachingTokenStore(private val delegate: TokenStore) : TokenStore {
 
     override fun load(): String? = token
 
+    /** The cached token is dropped even when the Keystore call throws (the exception still propagates). */
     override fun clear() {
-        delegate.clear()
-        put(null)
+        try {
+            delegate.clear()
+        } finally {
+            put(null)
+        }
     }
 
     private fun put(value: String?) = synchronized(lock) {
