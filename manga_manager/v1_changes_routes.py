@@ -52,7 +52,10 @@ def build_blueprint(cfg: Config, history: History, decorate: Callable[[dict], di
 
         max_id = history.max_update_id()
         min_id = history.min_update_id()
-        if since > max_id or (max_id and since < min_id - 1):
+        # max_id is the id sequence's high-water mark, so it survives a table emptied by retention pruning.
+        # An empty table "starts" right after it: a cursor below it missed pruned rows and must re-baseline.
+        oldest = min_id if min_id else max_id + 1
+        if since > max_id or since < oldest - 1:
             return no_store(jsonify(GONE)), 410
         etag = _etag(since, max_id)
         if since == max_id and _matches(request.headers.get("If-None-Match"), etag):

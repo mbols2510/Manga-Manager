@@ -209,3 +209,55 @@ def test_is_sensitive_category_is_none_safe_and_case_insensitive():
     assert is_sensitive_category(cfg, "adult") is True
     assert is_sensitive_category(cfg, "Hentai") is True
     assert is_sensitive_category(cfg, "Manga") is False
+
+
+def test_cursor_survives_a_fully_pruned_table(env):
+    # After web.keep_days without updates pruning empties the table; the id sequence keeps counting, so the
+    # cursor must too (otherwise since=C gets 410, the app re-baselines to 0, and the next item C+1 is lost).
+    app, h, db, hd = env
+    ids = add(h, 3)
+    high = ids[-1]
+    with db.connect() as c:
+        c.execute("UPDATE updates SET created_at = now() - interval '100 days'")
+    assert h.prune_updates(14) == 3
+    c = app.test_client()
+    assert c.get("/api/v1/changes/latest", headers=hd).json == {"cursor": high}
+    r = get(app, hd, since=high)
+    assert r.status_code == 200 and r.json == {"items": [], "next_cursor": high, "has_more": False}
+    assert get(app, {**hd, "If-None-Match": r.headers["ETag"]}, since=high).status_code == 304
+    assert get(app, hd, since=high + 1).status_code == 410
+    new = add(h, 1)[0]
+    assert new == high + 1
+    r = get(app, hd, since=high)
+    assert r.status_code == 200 and [i["id"] for i in r.json["items"]] == [new]
+
+
+def test_restart_identity_still_gives_410(env):
+    app, h, db, hd = env
+    ids = add(h, 3)
+    with db.connect() as c:
+        c.execute("TRUNCATE updates RESTART IDENTITY")
+    assert get(app, hd, since=ids[-1]).status_code == 410
+    assert app.test_client().get("/api/v1/changes/latest", headers=hd).json == {"cursor": 0}
+
+
+def test_max_update_id_uses_the_sequence_high_water_mark(env):
+    _, h, db, _ = env
+    assert h.max_update_id() == 0
+    ids = add(h, 2)
+    with db.connect() as c:
+        c.execute("DELETE FROM updates")
+    assert h.max_update_id() == ids[-1]
+
+
+def test_cursor_behind_a_fully_pruned_table_gets_410_before_the_next_insert(env):
+    # Rows the device never saw were pruned: it must re-baseline NOW (to the high-water mark), not only after
+    # the next insert, or that next update would be skipped by the late re-baseline.
+    app, h, db, hd = env
+    ids = add(h, 3)
+    with db.connect() as c:
+        c.execute("UPDATE updates SET created_at = now() - interval '100 days'")
+    h.prune_updates(14)
+    assert get(app, hd, since=ids[0]).status_code == 410
+    new = add(h, 1)[0]
+    assert [i["id"] for i in get(app, hd, since=ids[-1]).json["items"]] == [new]

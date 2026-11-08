@@ -71,7 +71,9 @@ list from the browse endpoint can hide mature thumbnails too.
 
 ### `GET /api/v1/changes/latest`
 
-Returns `{"cursor": <int>}`, the id of the newest update (`0` when there are none). Use it to bootstrap.
+Returns `{"cursor": <int>}`, the high-water mark of update ids: the newest id the server has ever handed out
+(`0` on a fresh or reset database). It does not fall back to `0` when retention pruning has deleted every row,
+so a stored cursor stays valid through a quiet period. Use it to bootstrap.
 
 ### `GET /api/v1/changes?since=<cursor>&limit=<n>`
 
@@ -94,10 +96,14 @@ Updates with `id > since`, oldest first. `since` defaults to `0` and must be a n
 * `sensitive` is true when the category (case-insensitive) is in `web.mature_categories` or
   `web.blur_categories`. Clients should hide those thumbnails and keep their titles out of notifications (the
   Android app blurs the covers and posts a generic notification text for them).
-* **ETag and 304.** Every `200` has an `ETag` derived from `since` and the newest id. When `since` equals the
-  newest id and the request carries a matching `If-None-Match`, the answer is `304` with no body.
-* **410 Gone.** `{"error": "cursor too old or reset"}` when `since` is above the newest id (the database was
-  reset) or below the oldest retained id minus one (retention pruning removed rows you have not seen).
+* **ETag and 304.** Every `200` has an `ETag` derived from `since` and the high-water mark. When `since`
+  equals the high-water mark and the request carries a matching `If-None-Match`, the answer is `304` with no
+  body.
+* **410 Gone.** `{"error": "cursor too old or reset"}` when `since` is above the high-water mark (the database
+  was reset, e.g. `TRUNCATE ... RESTART IDENTITY`) or below the oldest retained id minus one (retention pruning
+  removed rows you have not seen). When pruning has emptied the table, the oldest retained id counts as the
+  high-water mark plus one: `since` equal to the high-water mark answers `200` (empty) and the next update is
+  delivered normally; a lower `since` answers `410` straight away.
 
 ### Client rules
 

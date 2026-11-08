@@ -169,8 +169,18 @@ class History:
         return [_row(r) for r in rows]
 
     def max_update_id(self) -> int:
+        """High-water mark of update ids: the larger of MAX(id) and the id sequence's last issued value.
+
+        Retention pruning can empty the table while the BIGSERIAL keeps counting, so the cursor must not fall
+        back to 0 then (a device at cursor C would get 410, re-baseline to 0 and miss the next update C+1).
+        pg_sequence_last_value() is NULL until the sequence hands out a value, so a TRUNCATE ... RESTART
+        IDENTITY (a real reset) brings it back to 0 and a device ahead of it still gets 410.
+        """
         with self.db.connect() as c:
-            return int(c.execute("SELECT COALESCE(MAX(id), 0) AS n FROM updates").fetchone()["n"])
+            return int(c.execute(
+                "SELECT GREATEST(COALESCE(MAX(id), 0), "
+                "COALESCE(pg_sequence_last_value(pg_get_serial_sequence('updates', 'id')::regclass), 0)) AS n "
+                "FROM updates").fetchone()["n"])
 
     def min_update_id(self) -> int:
         with self.db.connect() as c:
