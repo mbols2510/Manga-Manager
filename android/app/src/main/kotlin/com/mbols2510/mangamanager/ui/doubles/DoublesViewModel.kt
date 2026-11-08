@@ -104,6 +104,9 @@ class DoublesViewModel(private val repository: ServerToolsRepository) : ViewMode
     private var actionJob: Job? = null
     private val scanJobs = mutableMapOf<Long, Job>()
 
+    /** The series whose remediate call is in flight, if any. */
+    private var remediating: Long? = null
+
     init {
         refresh()
     }
@@ -215,7 +218,13 @@ class DoublesViewModel(private val repository: ServerToolsRepository) : ViewMode
     }
 
     private suspend fun runRemediate(p: PendingConfirm.ConfirmRemediate) {
-        when (val r = repository.remediate(p.seriesId, p.chapter.id, p.keep.id)) {
+        remediating = p.seriesId
+        val r = try {
+            repository.remediate(p.seriesId, p.chapter.id, p.keep.id)
+        } finally {
+            remediating = null
+        }
+        when (r) {
             is ToolResult.Success -> {
                 recordPendingScan(p, r.value.libraryId)
                 mutableState.update { it.copy(message = DoublesMessage.Remediated(r.value.moved.size), unreachable = false) }
@@ -245,7 +254,16 @@ class DoublesViewModel(private val repository: ServerToolsRepository) : ViewMode
         refetchAfterChange(p.seriesId)
     }
 
+    /**
+     * Records the chapter for the Kavita scan. When the user already left the series (the remediate landed late), the
+     * scan is started now: no other trigger is left for it (a scan in flight picks it up when it succeeds).
+     */
     private fun recordPendingScan(p: PendingConfirm.ConfirmRemediate, libraryId: Long?) {
+        recordPending(p, libraryId)
+        if (mutableState.value.openSeriesId != p.seriesId) startScan(p.seriesId)
+    }
+
+    private fun recordPending(p: PendingConfirm.ConfirmRemediate, libraryId: Long?) {
         mutableState.update { s ->
             val old = s.pendingScans[p.seriesId]
             val library = libraryId ?: s.detail?.takeIf { it.id == p.seriesId }?.libraryId ?: old?.libraryId
@@ -265,6 +283,7 @@ class DoublesViewModel(private val repository: ServerToolsRepository) : ViewMode
         if (pending.chapters.isEmpty() || scanJobs[seriesId]?.isActive == true) return
         mutableState.update { it.copy(scanning = it.scanning + seriesId, kavita = KavitaNotice.Scanning(seriesId)) }
         scanJobs[seriesId] = viewModelScope.launch {
+            var followUp = false
             try {
                 val notice = when (val r = repository.kavitaScan(seriesId, pending.libraryId, pending.chapters)) {
                     is ToolResult.Success -> {
@@ -278,6 +297,12 @@ class DoublesViewModel(private val repository: ServerToolsRepository) : ViewMode
                             }
                             s.copy(pendingScans = scans)
                         }
+                        // Chapters recorded while this scan was in flight. Only after a clean success, so a failing
+                        // server is never asked twice; not while a remediate of the open series is still running
+                        // (leaving the series or its 404 will send them then).
+                        val s = mutableState.value
+                        followUp = s.pendingScans[seriesId]?.chapters.orEmpty().isNotEmpty() &&
+                            (s.openSeriesId != seriesId || remediating != seriesId)
                         KavitaNotice.Done(seriesId)
                     }
                     ToolResult.MaybeApplied -> KavitaNotice.MaybeApplied(seriesId)
@@ -293,6 +318,10 @@ class DoublesViewModel(private val repository: ServerToolsRepository) : ViewMode
                         kavita = s.kavita.takeUnless { it is KavitaNotice.Scanning && it.seriesId == seriesId },
                     )
                 }
+            }
+            if (followUp) {
+                scanJobs.remove(seriesId) // this job is ending: let the single follow-up start
+                startScan(seriesId)
             }
         }
     }
