@@ -82,7 +82,13 @@ class UpdatesViewModel(
             loaded = cached != null,
             cacheEmpty = all.isEmpty(),
         )
-    }.stateIn(viewModelScope, SharingStarted.Eagerly, UpdatesUiState(refreshing = true))
+    }.stateIn(
+        viewModelScope,
+        // Only while the screen collects (plus 5 s for a rotation): a background worker write must not re-run the
+        // feed query and the per-row filtering for a screen nobody looks at.
+        SharingStarted.WhileSubscribed(5_000),
+        UpdatesUiState(refreshing = true),
+    )
 
     init {
         refresh()

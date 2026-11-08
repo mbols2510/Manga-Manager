@@ -8,7 +8,10 @@ import com.mbols2510.mangamanager.data.repo.CheckResult
 import com.mbols2510.mangamanager.data.repo.FeedRefreshResult
 import com.mbols2510.mangamanager.data.repo.UpdatesRepository
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.onStart
 
 fun feedItem(
     id: Long,
@@ -74,4 +77,13 @@ class FeedApi(private val paged: MangaApi, var browse: List<UpdateDto> = emptyLi
         browseCalls++
         return UpdatesPageDto(browse, browse.size, offset, limit)
     }
+}
+
+/** Counts active collectors of [inner]'s feed, to prove the screen state is not shared without subscribers. */
+class CountingFeedRepository(val inner: FakeFeedRepository) : UpdatesRepository by inner {
+    @Volatile var active = 0
+    @Volatile var starts = 0
+    override val feed: Flow<List<UpdateEntity>> = inner.feedState
+        .onStart { active++; starts++ }
+        .onCompletion { active-- }
 }

@@ -40,9 +40,20 @@ interface UpdateDao {
     @Upsert
     suspend fun upsertAll(items: List<UpdateEntity>)
 
-    /** The cached feed, newest first. */
-    @Query("SELECT * FROM updates ORDER BY createdAt DESC, id DESC")
-    fun feed(): Flow<List<UpdateEntity>>
+    /** The cached feed, newest first, at most [limit] rows ([MAX_CACHED_UPDATES] in production). */
+    @Query("SELECT * FROM updates ORDER BY createdAt DESC, id DESC LIMIT :limit")
+    fun feed(limit: Int): Flow<List<UpdateEntity>>
+
+    /**
+     * The cache cap: deletes rows whose notification decision is taken (`notified = 1`) and that are not among the
+     * newest [keep] rows (same order as [feed]). Pending rows (`notified = 0`) are never deleted here, so no alert is
+     * lost; the table holds at most [keep] rows plus the pending ones.
+     */
+    @Query(
+        "DELETE FROM updates WHERE notified = 1 AND id NOT IN " +
+            "(SELECT id FROM updates ORDER BY createdAt DESC, id DESC LIMIT :keep)",
+    )
+    suspend fun trimNotified(keep: Int)
 
     /** At most 999 ids per call (SQLite variable limit on old Android versions); callers chunk. */
     @Query("SELECT id, notified FROM updates WHERE id IN (:ids)")

@@ -16,6 +16,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
+import com.mbols2510.mangamanager.data.repo.UpdatesRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -52,8 +56,12 @@ class UpdatesViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private fun vm(repo: FakeFeedRepository, credentials: PairedCredentialsHolder = PairedCredentialsHolder()) =
-        UpdatesViewModel(repo, credentials::get)
+    /**
+     * The ViewModel plus a collector standing in for the open screen: `state` is shared only while subscribed
+     * (`WhileSubscribed`, final-review fix E), so reading `state.value` needs a subscriber, as on the device.
+     */
+    private fun TestScope.vm(repo: UpdatesRepository, credentials: PairedCredentialsHolder = PairedCredentialsHolder()) =
+        UpdatesViewModel(repo, credentials::get).also { vm -> backgroundScope.launch { vm.state.collect {} } }
 
     private fun ids(vm: UpdatesViewModel) = vm.state.value.items.map { it.id }
 
@@ -258,6 +266,33 @@ class UpdatesViewModelTest {
     }
 
     @Test
+    fun feed_is_collected_only_while_the_screen_subscribes() = runTest(dispatcher) {
+        val repo = CountingFeedRepository(FakeFeedRepository(listOf(feedItem(1))))
+        val vm = UpdatesViewModel(repo, { null })
+        advanceUntilIdle() // the refresh on open reads the feed once (markSeenNotified) and lets go
+        assertEquals("no subscriber, no collection of the Room feed", 0, repo.active)
+
+        val screen = backgroundScope.launch { vm.state.collect {} }
+        runCurrent()
+        assertEquals(1, repo.active)
+        assertEquals(listOf(1L), vm.state.value.items.map { it.id })
+
+        screen.cancel()
+        advanceTimeBy(4_000)
+        runCurrent()
+        assertEquals("kept for 5 s (a rotation does not re-query)", 1, repo.active)
+        advanceTimeBy(1_500)
+        runCurrent()
+        assertEquals("upstream stopped after the timeout", 0, repo.active)
+
+        val starts = repo.starts
+        repo.inner.feedState.value = listOf(feedItem(2), feedItem(1)) // a worker write while nobody looks
+        advanceUntilIdle()
+        assertEquals("no collection restarted by a background write", starts, repo.starts)
+        assertEquals(0, repo.active)
+    }
+
+    @Test
     fun thumbnail_url_resolves_against_paired_base_and_never_when_unpaired() = runTest(dispatcher) {
         val base = "https://nas.example/manga/".toHttpUrl()
         assertEquals("https://nas.example/manga/thumb/7.png", resolveThumbnail(base, "thumb/7.png"))
@@ -302,10 +337,12 @@ class UpdatesViewModelTest {
             assertEquals(listOf(1L, 2L), repo.pendingNotifications().map { it.id })
 
             val vm = UpdatesViewModel(repo, { null })
+            val screen = CoroutineScope(Dispatchers.Default).launch { vm.state.collect {} } // the open screen
             withTimeout(5_000) {
                 while (api.browseCalls == 0 || vm.state.value.refreshing || repo.pendingNotifications().isNotEmpty()) delay(10)
             }
             assertEquals(listOf(1L, 2L), vm.state.value.items.map { it.id }.sorted())
+            screen.cancel()
 
             // The worker's next run: nothing left to decide, nothing new, so no notification for what the user saw.
             assertTrue(repo.pendingNotifications().isEmpty())

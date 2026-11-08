@@ -3,6 +3,13 @@ package com.mbols2510.mangamanager.data.db
 import androidx.room.withTransaction
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * How many updates the phone keeps. The server prunes after `web.keep_days`; without a cap the phone would keep
+ * everything, and every Room write re-runs the feed query over all of it. Rows still waiting for a notification
+ * decision (`notified == false`) are kept on top of this (see [UpdateDao.trimNotified]).
+ */
+const val MAX_CACHED_UPDATES = 500
+
 /** What the repository needs from local storage. The seam lets tests count writes. */
 interface UpdatesCache {
     fun feed(): Flow<List<UpdateEntity>>
@@ -20,7 +27,8 @@ interface UpdatesCache {
 
     /**
      * Upserts rows of the browse endpoint with `notified = true` (they are shown in the app, so they never notify).
-     * Never touches the sync state.
+     * Never touches the sync state. Applies the [MAX_CACHED_UPDATES] cap in the same transaction, like
+     * [applyChanges] and [markNotified].
      */
     suspend fun storeBrowsed(items: List<UpdateEntity>)
 
@@ -40,7 +48,7 @@ class RoomUpdatesCache internal constructor(
 
     private val dao = db.updateDao()
 
-    override fun feed(): Flow<List<UpdateEntity>> = dao.feed()
+    override fun feed(): Flow<List<UpdateEntity>> = dao.feed(MAX_CACHED_UPDATES)
 
     override suspend fun syncState(): SyncState? = dao.syncState()
 
@@ -55,6 +63,7 @@ class RoomUpdatesCache internal constructor(
             dao.upsertAll(items.map { it.copy(notified = known[it.id] ?: false) })
             afterUpsert()
             dao.putSyncState(state)
+            dao.trimNotified(MAX_CACHED_UPDATES) // new items are pending (notified = false), so never trimmed here
             items.filter { it.id !in known }
         }
 
@@ -62,12 +71,16 @@ class RoomUpdatesCache internal constructor(
         if (ids.isEmpty()) return
         db.withTransaction {
             ids.distinct().chunked(MAX_IDS_PER_QUERY).forEach { dao.markNotified(it) }
+            dao.trimNotified(MAX_CACHED_UPDATES) // rows that just stopped being pending fall under the cap
         }
     }
 
     override suspend fun storeBrowsed(items: List<UpdateEntity>) {
         if (items.isEmpty()) return
-        dao.upsertAll(items.map { it.copy(notified = true) })
+        db.withTransaction {
+            dao.upsertAll(items.map { it.copy(notified = true) })
+            dao.trimNotified(MAX_CACHED_UPDATES)
+        }
     }
 
     override suspend fun pendingNotifications(): List<UpdateEntity> = dao.pendingNotifications()

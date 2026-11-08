@@ -270,6 +270,26 @@ class UpdatesRepositoryTest {
         assertEquals(1, server.requestCount)
     }
 
+    /**
+     * Server fix C: after retention pruning emptied the table, `/latest` answers the id sequence's high-water mark
+     * (120 here), not 0, and `since=120` answers 200. The first update after the quiet period (121) is then reported
+     * as new, so the worker notifies it.
+     */
+    @Test
+    fun baseline_at_the_high_water_mark_reports_the_next_id_as_new() = runBlocking {
+        server.enqueue(latest(120))
+        assertEquals(CheckResult.NoChange, repo().checkForChanges())
+        server.enqueue(page(emptyList(), next = 120, more = false, etag = "\"e120\""))
+        assertEquals(CheckResult.NoChange, repo().checkForChanges())
+        server.enqueue(page(listOf(121L), next = 121, more = false))
+        val result = repo().checkForChanges() as CheckResult.NewItems
+        assertEquals(listOf(121L), result.items.map { it.id })
+        assertEquals(listOf(121L), repo().pendingNotifications().map { it.id })
+        assertEquals("/api/v1/changes/latest", take().path)
+        assertEquals("/api/v1/changes?since=120&limit=50", take().path)
+        assertEquals("/api/v1/changes?since=120&limit=50", take().path)
+    }
+
     @Test
     fun backlog_of_ten_pages_is_paged_in_one_check_and_cursor_ends_at_last_id() = runBlocking {
         seed(0)
