@@ -1,0 +1,10 @@
+# Suppressions for the OSV dependency scan (android/tools/osv_scan.py, run in CI).
+#
+# The scan fails on HIGH or CRITICAL findings (and on findings without any severity). Only add an entry when the
+# dependency cannot be upgraded yet (for example a build-time-only artifact pinned by the Android Gradle Plugin)
+# and say why it is acceptable. Every entry needs all three keys; an expired entry fails the scan again.
+#
+# [[ignore]]
+# id = "GHSA-xxxx-xxxx-xxxx"        # OSV/GHSA/CVE id or alias
+# reason = "Build-time only (pulled in by AGP lint), never packaged; no fixed release yet."
+# expires = 2027-02-01               # re-assess by this date (keep it within about 3 months)
