@@ -57,7 +57,15 @@ interface SettingsStore {
 
     suspend fun setNeedsRepair(value: Boolean)
 
-    /** Removes every stored setting (unpairing). */
+    /**
+     * Whether the system notification-permission prompt was already requested once from Settings (the user tapped
+     * the banner button). Afterwards the button opens the system settings instead of asking again. Kept by [clearAll].
+     */
+    suspend fun notificationPermissionRequested(): Boolean
+
+    suspend fun setNotificationPermissionRequested()
+
+    /** Removes every stored setting (unpairing), except the [notificationPermissionRequested] flag. */
     suspend fun clearAll()
 }
 
@@ -119,8 +127,20 @@ class DataStoreSettingsStore internal constructor(private val store: DataStore<P
         store.edit { if (value) it[NEEDS_REPAIR] = true else it.remove(NEEDS_REPAIR) }
     }
 
+    override suspend fun notificationPermissionRequested(): Boolean =
+        prefs.map { it[NOTIFICATION_PERMISSION_REQUESTED] ?: false }.first()
+
+    override suspend fun setNotificationPermissionRequested() {
+        store.edit { it[NOTIFICATION_PERMISSION_REQUESTED] = true }
+    }
+
     override suspend fun clearAll() {
-        store.edit { it.clear() }
+        store.edit {
+            // The prompt flag is about this install, not the pairing: unpairing must not re-arm the system prompt.
+            val asked = it[NOTIFICATION_PERMISSION_REQUESTED]
+            it.clear()
+            if (asked == true) it[NOTIFICATION_PERMISSION_REQUESTED] = true
+        }
     }
 
     private fun Preferences.toCheckSettings(): CheckSettings {
@@ -151,6 +171,7 @@ class DataStoreSettingsStore internal constructor(private val store: DataStore<P
         val QUIET_END = intPreferencesKey("quiet_hours_end_minute")
         val LAST_SUCCESSFUL_CHECK = longPreferencesKey("last_successful_check_at")
         val NEEDS_REPAIR = booleanPreferencesKey("needs_repair")
+        val NOTIFICATION_PERMISSION_REQUESTED = booleanPreferencesKey("notification_permission_requested")
         const val INTERVAL_OFF = 0
         const val SECONDS_PER_MINUTE = 60
         const val MINUTES_PER_DAY = 24 * 60
@@ -226,6 +247,10 @@ class CachingSettingsStore(private val delegate: SettingsStore) : SettingsStore 
     override suspend fun needsRepair(): Boolean = delegate.needsRepair()
 
     override suspend fun setNeedsRepair(value: Boolean) = delegate.setNeedsRepair(value)
+
+    override suspend fun notificationPermissionRequested(): Boolean = delegate.notificationPermissionRequested()
+
+    override suspend fun setNotificationPermissionRequested() = delegate.setNotificationPermissionRequested()
 
     override suspend fun clearAll() {
         delegate.clearAll()

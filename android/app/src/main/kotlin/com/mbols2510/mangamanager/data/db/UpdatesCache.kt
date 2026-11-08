@@ -26,6 +26,9 @@ interface UpdatesCache {
 
     /** Stored items whose notification decision is not taken yet (`notified == false`), oldest first. */
     suspend fun pendingNotifications(): List<UpdateEntity>
+
+    /** Unpairing: removes every cached update and the sync state (cursor, ETag) in ONE transaction. */
+    suspend fun clearAll()
 }
 
 /** Room implementation. [afterUpsert] runs inside the transaction between the upsert and the cursor write (tests inject a failure there). */
@@ -68,6 +71,10 @@ class RoomUpdatesCache internal constructor(
     }
 
     override suspend fun pendingNotifications(): List<UpdateEntity> = dao.pendingNotifications()
+
+    override suspend fun clearAll() {
+        // TASK12-STUB
+    }
 
     private companion object {
         const val MAX_IDS_PER_QUERY = 500

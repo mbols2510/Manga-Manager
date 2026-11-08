@@ -78,6 +78,10 @@ class FakeUpdatesRepository(var next: CheckResult = CheckResult.NoChange) : Upda
     }
 
     override suspend fun pendingNotifications(): List<UpdateEntity> = pending.toList()
+
+    override suspend fun clearLocalData() {
+        pending.clear()
+    }
 }
 
 /** Serves ids 1..[total] in cursor pages, like `GET api/v1/changes`. */

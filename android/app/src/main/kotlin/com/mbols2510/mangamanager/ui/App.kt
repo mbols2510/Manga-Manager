@@ -27,6 +27,8 @@ import com.mbols2510.mangamanager.ui.jobs.JobsScreen
 import com.mbols2510.mangamanager.ui.jobs.JobsViewModel
 import com.mbols2510.mangamanager.ui.pairing.PairingScreen
 import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
+import com.mbols2510.mangamanager.ui.settings.SettingsScreen
+import com.mbols2510.mangamanager.ui.settings.SettingsViewModel
 import com.mbols2510.mangamanager.ui.updates.UpdatesScreen
 import com.mbols2510.mangamanager.ui.updates.UpdatesViewModel
 import kotlinx.coroutines.CoroutineDispatcher
@@ -79,6 +81,9 @@ fun App(appViewModel: AppViewModel, viewModelFactory: ViewModelProvider.Factory)
                 updatesScreen = { UpdatesScreen(viewModel = viewModel<UpdatesViewModel>(factory = viewModelFactory)) },
                 doublesScreen = { DoublesScreen(viewModel = viewModel<DoublesViewModel>(factory = viewModelFactory)) },
                 jobsScreen = { JobsScreen(viewModel = viewModel<JobsViewModel>(factory = viewModelFactory)) },
+                settingsScreen = { toPairing ->
+                    SettingsScreen(viewModel = viewModel<SettingsViewModel>(factory = viewModelFactory), onNavigateToPairing = toPairing)
+                },
             )
         }
     }

@@ -211,4 +211,57 @@
     <string name="jobs_job_running">Running</string>
     <string name="jobs_job_last_finished">Last finished: %1$s</string>
     <string name="jobs_job_last_error">Last error: %1$s</string>
+    <!-- Settings (Task 12). The server URL is shown read-only; the token is never shown. -->
+    <string name="settings_repair_title">This device must be paired again</string>
+    <string name="settings_repair_text">The server rejected this device's token, so background checks are paused. Create a new pairing code on the server and pair again.</string>
+    <string name="settings_repair_action">Re-pair this device</string>
+    <string name="settings_server_title">Server</string>
+    <string name="settings_server_none">Not paired</string>
+    <string name="settings_encrypted">Encrypted connection (HTTPS)</string>
+    <string name="settings_unencrypted_title">Unencrypted connection</string>
+    <string name="settings_unencrypted_text">This server is reached over plain HTTP. Anyone on the same network can read this device's token and your updates. Use HTTPS or a VPN such as Tailscale if you can.</string>
+    <string name="settings_unpair">Unpair / pair another server</string>
+    <string name="settings_unpairing">Unpairing…</string>
+    <string name="settings_unpair_confirm_title">Unpair this device?</string>
+    <string name="settings_unpair_confirm_text">This removes the token, the saved updates, cached covers and the check settings from this phone and stops background checks. The token stays valid on the server until you revoke it under Settings &gt; Devices.</string>
+    <string name="settings_unpair_confirm_action">Unpair</string>
+    <string name="settings_checks_title">Background checks</string>
+    <string name="settings_battery_hint">Shorter intervals use more battery. 30 minutes or more is recommended.</string>
+    <string name="settings_interval_off">Off</string>
+    <plurals name="settings_interval_minutes">
+        <item quantity="one">%d minute</item>
+        <item quantity="other">%d minutes</item>
+    </plurals>
+    <plurals name="settings_interval_hours">
+        <item quantity="one">%d hour</item>
+        <item quantity="other">%d hours</item>
+    </plurals>
+    <string name="settings_in_effect_every">In effect: a check about every %1$s while the battery is not low.</string>
+    <string name="settings_in_effect_every_wifi">In effect: a check about every %1$s on Wi-Fi while the battery is not low.</string>
+    <string name="settings_in_effect_off">In effect: background checks are off. New updates only arrive when you open the app.</string>
+    <string name="settings_in_effect_paused">In effect: background checks are paused until this device is paired.</string>
+    <string name="settings_last_check">Last successful check: %1$s</string>
+    <string name="settings_last_check_never">Never</string>
+    <string name="settings_wifi_only">Wi-Fi only</string>
+    <string name="settings_wifi_only_text">Check only on Wi-Fi or other unmetered networks.</string>
+    <string name="settings_quiet_hours">Quiet hours</string>
+    <string name="settings_quiet_hours_text">No alerts during these hours; new updates are still saved. The range may span midnight.</string>
+    <string name="settings_quiet_start">Start</string>
+    <string name="settings_quiet_end">End</string>
+    <string name="settings_quiet_start_title">Quiet hours start</string>
+    <string name="settings_quiet_end_title">Quiet hours end</string>
+    <string name="settings_quiet_same_time">Start and end must be different times.</string>
+    <string name="settings_night_stretch">Slow down at night</string>
+    <string name="settings_night_stretch_text">During quiet hours, check at most every 2 hours.</string>
+    <string name="settings_notifications_title">Notifications</string>
+    <string name="settings_notifications_on">Notifications are on.</string>
+    <string name="settings_notifications_denied">Notifications are not allowed. New updates are still saved and shown in the app, but no alerts appear.</string>
+    <string name="settings_notifications_off">Notifications are turned off for this app. New updates are still saved and shown in the app, but no alerts appear.</string>
+    <string name="settings_notifications_channel_blocked">Update notifications are turned off in the system settings. New updates are still saved, but no alerts appear.</string>
+    <string name="settings_notifications_allow">Allow notifications</string>
+    <string name="settings_notifications_open_settings">Open notification settings</string>
+    <string name="settings_about_title">About</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_about_revoke">To cut this device off for good, revoke it on the server under Settings &gt; Devices. This app sends no analytics.</string>
+    <string name="action_ok">OK</string>
 </resources>

@@ -17,9 +17,17 @@ import java.util.concurrent.TimeUnit
  * enqueue time and period count (WorkManager copies them into the updated spec), so calling it on every app start
  * does not push the next run back; only changed parameters take effect. `intervalMinutes == null` cancels instead.
  */
-class Scheduler(private val workManager: WorkManager) {
+/** What Settings and app start need from the scheduler; [Scheduler] is the WorkManager implementation (test seam). */
+interface CheckScheduler {
+    /** Idempotent: an unchanged schedule keeps its timing; a null interval cancels. */
+    fun apply(settings: CheckSettings)
 
-    fun apply(settings: CheckSettings) {
+    fun cancel()
+}
+
+class Scheduler(private val workManager: WorkManager) : CheckScheduler {
+
+    override fun apply(settings: CheckSettings) {
         if (settings.intervalMinutes == null) {
             cancel()
             return
@@ -27,7 +35,7 @@ class Scheduler(private val workManager: WorkManager) {
         workManager.enqueueUniquePeriodicWork(UNIQUE_WORK_NAME, ExistingPeriodicWorkPolicy.UPDATE, request(settings))
     }
 
-    fun cancel() {
+    override fun cancel() {
         workManager.cancelUniqueWork(UNIQUE_WORK_NAME)
     }
 

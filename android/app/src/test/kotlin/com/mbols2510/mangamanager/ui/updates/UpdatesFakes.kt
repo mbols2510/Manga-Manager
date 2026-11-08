@@ -60,6 +60,10 @@ class FakeFeedRepository(initial: List<UpdateEntity> = emptyList()) : UpdatesRep
     }
 
     override suspend fun pendingNotifications(): List<UpdateEntity> = feedState.value.filterNot { it.notified }
+
+    override suspend fun clearLocalData() {
+        feedState.value = emptyList()
+    }
 }
 
 /** [paged] for the change feed, plus a fixed browse page. */

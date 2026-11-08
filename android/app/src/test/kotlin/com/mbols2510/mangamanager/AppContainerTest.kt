@@ -65,6 +65,8 @@ private class HangingSettingsStore : SettingsStore {
     override val needsRepair: Flow<Boolean> = emptyFlow()
     override suspend fun needsRepair(): Boolean = awaitCancellation()
     override suspend fun setNeedsRepair(value: Boolean) = awaitCancellation()
+    override suspend fun notificationPermissionRequested(): Boolean = awaitCancellation()
+    override suspend fun setNotificationPermissionRequested() = awaitCancellation()
     override suspend fun clearAll() = awaitCancellation()
 }
 

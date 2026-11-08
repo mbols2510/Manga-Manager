@@ -133,6 +133,19 @@ class UpdatesRepositoryTest {
 
     private suspend fun snapshot(): Pair<List<UpdateEntity>, SyncState?> = db.updateDao().allById() to db.updateDao().syncState()
 
+    @Test
+    fun clear_local_data_removes_rows_and_sync_state() = runBlocking {
+        seed(9, "\"e9\"", 1, 2, 3)
+        assertEquals(3, snapshot().first.size)
+
+        repo().clearLocalData()
+
+        val (rows, state) = snapshot()
+        assertTrue("cached rows removed", rows.isEmpty())
+        assertNull("cursor and ETag removed", state)
+        assertTrue(repo().feed.first().isEmpty())
+    }
+
     private fun take(): RecordedRequest = server.takeRequest(5, TimeUnit.SECONDS)!!
 
     // ---------------------------------------------------------------- brief tests

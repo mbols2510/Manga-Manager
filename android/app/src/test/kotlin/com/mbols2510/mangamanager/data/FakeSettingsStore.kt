@@ -47,6 +47,15 @@ class FakeSettingsStore(
         repair.value = value
     }
 
+    var permissionRequested = false
+
+    override suspend fun notificationPermissionRequested(): Boolean = permissionRequested
+
+    override suspend fun setNotificationPermissionRequested() {
+        permissionRequested = true
+    }
+
+    /** Like the DataStore store: everything except the notification prompt flag. */
     override suspend fun clearAll() {
         url.value = null
         check.value = CheckSettings.DEFAULT

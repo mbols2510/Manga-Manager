@@ -63,6 +63,12 @@ interface UpdateDao {
 
     @Upsert
     suspend fun putSyncState(state: SyncState)
+
+    @Query("DELETE FROM updates")
+    suspend fun deleteAllUpdates()
+
+    @Query("DELETE FROM sync_state")
+    suspend fun deleteSyncState()
 }
 
 /** Chapters as a JSON array: chapter names may contain commas, quotes or anything else. */

@@ -61,8 +61,8 @@ fun startRoute(isPaired: Boolean, needsRepair: Boolean): String =
 /**
  * The app's navigation shell. [pairingScreen] receives the callback to run after a successful pairing.
  * Whenever [needsRepair] becomes true (a 401 anywhere), the back stack is replaced by the pairing route.
- * [updatesScreen], [doublesScreen] and [jobsScreen] are the contents of those destinations (placeholders when not
- * given).
+ * [updatesScreen], [doublesScreen], [jobsScreen] and [settingsScreen] are the contents of those destinations
+ * (placeholders when not given); [settingsScreen] gets the callback that replaces the back stack by the pairing route.
  */
 @Composable
 fun AppNavHost(
@@ -73,6 +73,7 @@ fun AppNavHost(
     updatesScreen: @Composable () -> Unit = { ComingSoon(R.string.nav_updates) },
     doublesScreen: @Composable () -> Unit = { ComingSoon(R.string.nav_doubles) },
     jobsScreen: @Composable () -> Unit = { ComingSoon(R.string.nav_jobs) },
+    settingsScreen: @Composable (navigateToPairing: () -> Unit) -> Unit = { ComingSoon(R.string.nav_settings) },
     navController: NavHostController = rememberNavController(),
 ) {
     val repair by needsRepair.collectAsStateWithLifecycle()
@@ -109,7 +110,15 @@ fun AppNavHost(
             composable(Routes.UPDATES) { updatesScreen() }
             composable(Routes.DOUBLES) { doublesScreen() }
             composable(Routes.JOBS) { jobsScreen() }
-            composable(Routes.SETTINGS) { ComingSoon(R.string.nav_settings) }
+            composable(Routes.SETTINGS) {
+                // Unpair or "Re-pair this device": the whole paired back stack goes, pairing becomes the root.
+                settingsScreen {
+                    navController.navigate(Routes.PAIRING) {
+                        popUpTo(navController.graph.id) { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+            }
         }
     }
 }

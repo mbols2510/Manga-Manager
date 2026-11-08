@@ -45,6 +45,17 @@ class DataStoreSettingsStoreTest {
     }
 
     @Test
+    fun notification_prompt_flag_survives_clear_all() = runBlocking {
+        val store = store()
+        assertFalse(store.notificationPermissionRequested())
+        store.setNotificationPermissionRequested()
+        store.setServerUrl("https://manga.example.com/")
+        store.clearAll()
+        assertTrue("unpairing does not re-arm the system prompt", store.notificationPermissionRequested())
+        assertNull(store.serverUrl())
+    }
+
+    @Test
     fun clear_all_removes_everything() = runBlocking {
         val store = store()
         store.setServerUrl("http://192.168.1.5:5000/")

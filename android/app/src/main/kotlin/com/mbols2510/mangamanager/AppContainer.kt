@@ -5,6 +5,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.work.WorkManager
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
 import com.mbols2510.mangamanager.core.CachingTokenStore
 import com.mbols2510.mangamanager.core.KeystoreTokenStore
 import com.mbols2510.mangamanager.core.TokenStore
@@ -28,6 +30,8 @@ import com.mbols2510.mangamanager.ui.AppViewModel
 import com.mbols2510.mangamanager.ui.doubles.DoublesViewModel
 import com.mbols2510.mangamanager.ui.jobs.JobsViewModel
 import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
+import com.mbols2510.mangamanager.ui.settings.SettingsViewModel
+import com.mbols2510.mangamanager.ui.settings.readNotificationStatus
 import com.mbols2510.mangamanager.ui.updates.UpdatesViewModel
 import com.mbols2510.mangamanager.work.CheckWorker
 import com.mbols2510.mangamanager.work.DeviceClock
@@ -45,10 +49,14 @@ class AppContainer internal constructor(
     context: Context,
     settings: SettingsStore?,
     tokens: TokenStore?,
+    imageLoader: (() -> ImageLoader)? = null,
 ) {
     constructor(context: Context) : this(context, null, null)
 
     private val appContext = context.applicationContext
+
+    /** Coil's loader (the app singleton installed by `MangaApp`) whose caches [unpair] empties. */
+    private val coverLoader: () -> ImageLoader = imageLoader ?: { SingletonImageLoader.get(appContext) }
 
     val authState: AuthState = AuthState()
     /** Caches the token in memory; call [CachingTokenStore.warmUp] off the main thread at startup. */
@@ -105,22 +113,30 @@ class AppContainer internal constructor(
      * `Scheduler.apply` uses the UPDATE policy, so an unchanged schedule keeps its timing. Call on IO.
      */
     suspend fun scheduleChecksIfPaired() {
-        // The PERSISTED flag decides (the worker sets it on a 401 and cancels the work); never re-schedule over it.
-        if (credentials.get() == null || authState.needsRepair.value || settingsStore.needsRepair()) return
+        if (!mayScheduleChecks()) return
         scheduler.apply(settingsStore.checkSettings())
     }
+
+    /**
+     * Whether the periodic check may be (re)scheduled: paired and not waiting for a re-pair. The PERSISTED flag also
+     * decides (the worker sets it on a 401 and cancels the work); never re-schedule over it. Settings uses the same
+     * guard, so a change made while unpaired is stored but only scheduled after pairing.
+     */
+    suspend fun mayScheduleChecks(): Boolean =
+        credentials.get() != null && !authState.needsRepair.value && !settingsStore.needsRepair()
 
     /** After a successful (re-)pairing, which has cleared the repair flag: schedule the periodic check. Call on IO. */
     suspend fun scheduleAfterPairing() {
         scheduler.apply(settingsStore.checkSettings())
     }
 
-    /** Unpairs: the request path stops first, then the persisted token and URL are removed. Call on IO. */
-    suspend fun unpair() {
+    /** TASK12-STUB: unpair is extended in the implementation commit. */
+    suspend fun unpair(): Boolean {
         credentials.clear()
         scheduler.cancel()
         tokenStore.clear()
         settingsStore.clearAll()
+        return true
     }
 
     /** Time source for the background check (device default time zone, read on every call). */
@@ -175,5 +191,15 @@ class AppContainer internal constructor(
         initializer { UpdatesViewModel(updatesRepository, credentials::get, ensureReady = ::warmUpIfCold) }
         initializer { DoublesViewModel(serverTools) }
         initializer { JobsViewModel(serverTools) }
+        initializer {
+            SettingsViewModel(
+                settings = settingsStore,
+                authState = authState,
+                scheduler = scheduler,
+                mayScheduleChecks = ::mayScheduleChecks,
+                unpairAction = { unpair() },
+                readNotificationStatus = { readNotificationStatus(appContext) },
+            )
+        }
     }
 }

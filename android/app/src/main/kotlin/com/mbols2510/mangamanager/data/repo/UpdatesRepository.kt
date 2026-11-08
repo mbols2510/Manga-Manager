@@ -78,6 +78,12 @@ interface UpdatesRepository {
      * every check, so a crash between storing items and [markNotified] notifies them once on the next run.
      */
     suspend fun pendingNotifications(): List<UpdateEntity>
+
+    /**
+     * Unpairing: removes the cached feed and the sync state (cursor, ETag). Takes the same lock as the checks, so a
+     * check that was in flight cannot write rows or a cursor of the old server after it.
+     */
+    suspend fun clearLocalData()
 }
 
 /**
@@ -182,6 +188,10 @@ class DefaultUpdatesRepository internal constructor(
     override suspend fun markNotified(ids: Collection<Long>) = cache.markNotified(ids)
 
     override suspend fun pendingNotifications(): List<UpdateEntity> = cache.pendingNotifications()
+
+    override suspend fun clearLocalData() {
+        // TASK12-STUB
+    }
 
     private suspend fun baselineWith(client: MangaApi) {
         val latest = client.latest()
