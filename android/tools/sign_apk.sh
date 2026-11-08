@@ -50,7 +50,7 @@ rm -f "$ks"
 rm -f "$out.idsig"
 
 echo "== apksigner verify"
-"$bt/apksigner" verify --print-certs --verbose "$out" | grep -E '^(Verifies|Verified using|Number of signers|Signer #1 certificate (DN|SHA-256))'
+"$bt/apksigner" verify --print-certs --verbose "$out" | grep -E '^(Verifies|Verified using|Number of signers|.*Signer.*certificate (DN|SHA-256 digest))'
 echo "== zipalign check of the signed APK"
 "$bt/zipalign" -c -P 16 4 "$out"
 echo "zipalign: signed APK aligned"
