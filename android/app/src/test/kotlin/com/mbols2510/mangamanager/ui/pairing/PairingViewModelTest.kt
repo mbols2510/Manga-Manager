@@ -299,7 +299,12 @@ class PairingViewModelTest {
 
         PairingViewModel(store, urls, auth, repository, holder, server, dispatcher).submit(code)
         assertEquals(
-            listOf("holder.clear", "token.save[holder=null]", "url.set[holder=null]", "holder.set", "baseline[holder=set]"),
+            // url.clear before token.save (final-review fix F): a crash after the token write never pairs the
+            // new token with the old server's URL.
+            listOf(
+                "holder.clear", "url.clear[holder=null]", "token.save[holder=null]", "url.set[holder=null]",
+                "holder.set", "baseline[holder=set]",
+            ),
             log,
         )
         assertEquals("https://manga.example.com/", holder.get()!!.base.toString())
@@ -310,12 +315,52 @@ class PairingViewModelTest {
         PairingViewModel(store, urls, auth, repository, holder, server, dispatcher).submit(code)
         assertEquals(
             listOf(
-                "holder.clear", "token.save[holder=null]", "url.set[holder=null]", "holder.set",
-                "baseline[holder=set]", "holder.clear", "token.clear[holder=null]", "url.clear[holder=null]",
+                "holder.clear", "url.clear[holder=null]", "token.save[holder=null]", "url.set[holder=null]",
+                "holder.set", "baseline[holder=set]", "holder.clear", "token.clear[holder=null]",
+                "url.clear[holder=null]",
             ),
             log,
         )
         assertNull(holder.get())
+    }
+
+    @Test
+    fun pairing_writes_clear_the_url_then_save_the_token_then_write_the_url_then_publish() = runTest(dispatcher) {
+        val events = mutableListOf<String>()
+        val holder = object : PairedCredentialsHolder() {
+            override fun set(base: HttpUrl, token: String) {
+                events += "publish"
+                super.set(base, token)
+            }
+        }
+        val urlState = MutableStateFlow<String?>("https://old.example.com/")
+        val urls = object : SettingsStore by FakeSettingsStore() {
+            override val serverUrl: Flow<String?> = urlState
+            override suspend fun serverUrl(): String? = urlState.value
+            override suspend fun setServerUrl(url: String?) {
+                events += if (url == null) "clearUrl" else "urlSet"
+                urlState.value = url
+            }
+        }
+        var urlWhenTokenSaved: String? = "unset"
+        val store = object : TokenStore {
+            var token: String? = "old-token"
+            override fun save(token: String) {
+                events += "tokenSave"
+                urlWhenTokenSaved = urlState.value
+                this.token = token
+            }
+            override fun load(): String? = token
+            override fun clear() { token = null }
+        }
+
+        val vm = PairingViewModel(store, urls, auth, repo, holder, server, dispatcher)
+        vm.submit(pairingCode("https://manga.example.com", TOKEN))
+
+        assertEquals(PairingUiState.Success, vm.state.value)
+        assertEquals(listOf("clearUrl", "tokenSave", "urlSet", "publish"), events)
+        assertNull("no URL is persisted while the new token is written", urlWhenTokenSaved)
+        assertEquals("https://manga.example.com/", urlState.value)
     }
 
     @Test

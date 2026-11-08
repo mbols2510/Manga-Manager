@@ -11,6 +11,8 @@ import com.mbols2510.mangamanager.data.CheckSettings
 import com.mbols2510.mangamanager.data.FakeSettingsStore
 import com.mbols2510.mangamanager.data.SettingsStore
 import com.mbols2510.mangamanager.data.api.NotPairedException
+import com.mbols2510.mangamanager.data.repo.AuthState
+import com.mbols2510.mangamanager.data.api.PairedCredentialsHolder
 import com.mbols2510.mangamanager.data.repo.CheckResult
 import com.mbols2510.mangamanager.ui.pairing.FakeServer
 import com.mbols2510.mangamanager.ui.pairing.FakeTokenStore
@@ -105,6 +107,45 @@ class AppContainerTest {
         assertFalse(container.authState.needsRepair.value)
         runBlocking { container.warmUp() }
         assertTrue("a 401 seen by the worker in an earlier process survives", container.authState.needsRepair.value)
+    }
+
+    /**
+     * Process death right after the new token was written (before the new URL): what is on disk then is the new
+     * token and NO URL, so the next start publishes nothing (never the new token with the old server's URL).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun crash_after_the_token_write_leaves_no_url_so_warm_up_publishes_nothing() {
+        val dispatcher = UnconfinedTestDispatcher()
+        Dispatchers.setMain(dispatcher)
+        try {
+            val settings = FakeSettingsStore("https://old.example.com/")
+            var onDisk: Pair<String?, String?>? = null
+            val tokens = object : TokenStore {
+                var token: String? = "tok_old_0123456789abcdef"
+                override fun save(token: String) {
+                    this.token = token
+                    // The moment the process could die: snapshot what is persisted now.
+                    onDisk = token to runBlocking { settings.serverUrl() }
+                }
+                override fun load(): String? = token
+                override fun clear() { token = null }
+            }
+            val newToken = "tok_new_0123456789abcdef"
+            PairingViewModel(
+                tokens, settings, AuthState(), FakeUpdatesRepository(), PairedCredentialsHolder(),
+                FakeServer(validToken = newToken), dispatcher,
+            ).submit(pairingCode("https://manga.example.com", newToken))
+
+            val (diskToken, diskUrl) = onDisk!!
+            assertEquals(newToken, diskToken)
+            assertNull("the old URL is gone before the new token is written", diskUrl)
+            val restarted = AppContainer(context, FakeSettingsStore(diskUrl), FakeTokenStore().apply { token = diskToken })
+            runBlocking { restarted.warmUp() }
+            assertNull("nothing is published: the app asks to pair again", restarted.credentials.get())
+        } finally {
+            Dispatchers.resetMain()
+        }
     }
 
     @Test

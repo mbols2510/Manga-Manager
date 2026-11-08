@@ -3,6 +3,7 @@ package com.mbols2510.mangamanager.core
 import android.content.Context
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import java.io.IOException
 import java.security.KeyStore
 import java.util.Base64
 import javax.crypto.Cipher
@@ -152,12 +153,16 @@ private class SharedPrefsByteStore(context: Context, name: String) : ByteStore {
 
     override fun read(): ByteArray? = prefs.getString(KEY, null)?.let { Base64.getDecoder().decode(it) }
 
+    // commit(), not apply(): the write is on disk before the pairing goes on to write the URL (and before unpair
+    // reports success), so a crash cannot leave the old token next to the new URL. Callers are off the main thread.
     override fun write(bytes: ByteArray) {
-        prefs.edit().putString(KEY, Base64.getEncoder().encodeToString(bytes)).apply()
+        if (!prefs.edit().putString(KEY, Base64.getEncoder().encodeToString(bytes)).commit()) {
+            throw IOException("Could not store the device token")
+        }
     }
 
     override fun delete() {
-        prefs.edit().remove(KEY).apply()
+        if (!prefs.edit().remove(KEY).commit()) throw IOException("Could not remove the device token")
     }
 
     private companion object {

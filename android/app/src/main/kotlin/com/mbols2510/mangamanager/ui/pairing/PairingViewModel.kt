@@ -145,6 +145,10 @@ class PairingViewModel(
             withContext(ioDispatcher) {
                 // Nothing may use the old pairing, or a half-written one, while the new one is persisted.
                 credentials.clear()
+                // Persisted order: URL cleared, token saved, URL written. A crash anywhere in between leaves a token
+                // without a URL (warm-up publishes nothing, the app asks to pair), never a new token next to the old
+                // server's URL, so the new token can never go to the old origin.
+                settings.setServerUrl(null)
                 tokenStore.save(candidate.token)
                 settings.setServerUrl(candidate.base.toString())
                 // Publish base and token to the request path together, only now that both writes succeeded.
