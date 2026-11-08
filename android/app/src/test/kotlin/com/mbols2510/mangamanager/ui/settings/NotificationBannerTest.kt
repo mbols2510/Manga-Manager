@@ -83,7 +83,7 @@ class NotificationBannerTest {
 
     // ------------------------------------------------------------------ the prompt after pairing
 
-    private fun appViewModel(settings: FakeSettingsStore, status: () -> NotificationStatus = ::systemStatus) =
+    private fun appViewModel(settings: FakeSettingsStore, status: () -> NotificationStatus = { systemStatus() }) =
         AppViewModel(
             CachingTokenStore(FakeTokenStore()), CachingSettingsStore(settings), AuthState(),
             ioDispatcher = Dispatchers.Unconfined,
@@ -123,7 +123,7 @@ class NotificationBannerTest {
         assertTrue(startedActions().isEmpty())
 
         // A fresh app start (same stored flag) does not claim the prompt either.
-        assertFalse(runBlocking { NotificationPrompt(settings, ::systemStatus).claimAfterPairing() })
+        assertFalse(runBlocking { NotificationPrompt(settings) { systemStatus() }.claimAfterPairing() })
     }
 
     @Test
@@ -164,7 +164,7 @@ class NotificationBannerTest {
     private fun showUpdates(
         settings: FakeSettingsStore,
         session: NotificationBannerSession = NotificationBannerSession(),
-        status: () -> NotificationStatus = ::systemStatus,
+        status: () -> NotificationStatus = { systemStatus() },
     ): NotificationBannerViewModel {
         val banner = NotificationBannerViewModel(settings, status, session, io = Dispatchers.Unconfined)
         val updates = UpdatesViewModel(FakeFeedRepository(listOf(feedItem(1, title = "Cached"))), { null })
