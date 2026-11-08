@@ -106,10 +106,14 @@ class DecideTests(unittest.TestCase):
         self.assertTrue(self.decide(report(LABEL_ONLY_CRITICAL)).blocked)
 
     def test_allowlisted_by_alias_passes(self):
-        entry = osv_scan.AllowEntry("CVE-2023-0001", "not reachable: we never call the vulnerable API", TODAY)
+        entry = osv_scan.AllowEntry("CVE-2023-0001", "com.squareup.okio:okio", "not reachable: we never call the vulnerable API", TODAY)
         d = self.decide(report(HIGH_RUNTIME), allow=[entry])
         self.assertFalse(d.blocked)
         self.assertEqual(d.rows[0].action, "ALLOWLISTED")
+
+    def test_allowlist_is_scoped_to_its_package(self):
+        entry = osv_scan.AllowEntry("CVE-2023-0001", "com.google.guava:guava", "build-time only, no fix yet", TODAY)
+        self.assertTrue(self.decide(report(HIGH_RUNTIME), allow=[entry]).blocked)
 
     def test_runtime_label(self):
         runtime = osv_scan.parse_gradle_dependencies(RUNTIME_DEPS)
@@ -124,23 +128,29 @@ class AllowlistTests(unittest.TestCase):
         self.assertEqual(osv_scan.load_allowlist("# nothing\n", TODAY), ([], []))
 
     def test_valid_entry(self):
-        text = '[[ignore]]\nid = "GHSA-x"\nreason = "build-time only, no fix released yet"\nexpires = 2027-01-31\n'
+        text = '[[ignore]]\nid = "GHSA-x"\npackage = "g:a"\nreason = "build-time only, no fix released yet"\nexpires = 2027-01-31\n'
         entries, problems = osv_scan.load_allowlist(text, TODAY)
         self.assertEqual(problems, [])
         self.assertEqual(entries[0].expires, datetime.date(2027, 1, 31))
 
     def test_missing_reason_rejected(self):
-        _, problems = osv_scan.load_allowlist('[[ignore]]\nid = "GHSA-x"\nexpires = 2027-01-31\n', TODAY)
+        _, problems = osv_scan.load_allowlist('[[ignore]]\nid = "GHSA-x"\npackage = "g:a"\nexpires = 2027-01-31\n', TODAY)
         self.assertTrue(any("reason" in p for p in problems))
 
     def test_missing_expiry_rejected(self):
-        _, problems = osv_scan.load_allowlist('[[ignore]]\nid = "GHSA-x"\nreason = "because of reasons"\n', TODAY)
+        _, problems = osv_scan.load_allowlist('[[ignore]]\nid = "GHSA-x"\npackage = "g:a"\nreason = "because of reasons"\n', TODAY)
         self.assertTrue(any("expires" in p for p in problems))
 
     def test_expired_entry_rejected(self):
-        text = '[[ignore]]\nid = "GHSA-x"\nreason = "build-time only, no fix"\nexpires = 2026-11-07\n'
+        text = '[[ignore]]\nid = "GHSA-x"\npackage = "g:a"\nreason = "build-time only, no fix"\nexpires = 2026-11-07\n'
         entries, problems = osv_scan.load_allowlist(text, TODAY)
         self.assertTrue(any("expired" in p for p in problems))
+        self.assertEqual(entries, [])
+
+    def test_missing_package_rejected(self):
+        text = '[[ignore]]\nid = "GHSA-x"\nreason = "build-time only, no fix"\nexpires = 2027-01-01\n'
+        entries, problems = osv_scan.load_allowlist(text, TODAY)
+        self.assertTrue(any("package" in p for p in problems))
         self.assertEqual(entries, [])
 
     def test_unknown_key_rejected(self):

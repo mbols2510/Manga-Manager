@@ -11,8 +11,8 @@ Policy (documented in README "Android app"):
     Severity = the group's CVSS max_severity (>= 9.0 CRITICAL, >= 7.0 HIGH, >= 4.0 MEDIUM, else LOW) and, when
     OSV has no score, the advisory's database_specific.severity label.
   * MEDIUM/LOW are printed as warnings.
-  * android/osv-allowlist.toml can suppress a finding by id or alias; every entry needs a reason and an expiry
-    date; an expired or incomplete entry fails the job.
+  * android/osv-allowlist.toml can suppress a finding by id or alias for ONE package (group:artifact); every
+    entry needs a reason and an expiry date; an expired or incomplete entry fails the job.
   * The scanner must report a non-zero package count, and any scanner error fails the job.
 
 Usage: osv_scan.py --scanner PATH --lockfile verification-metadata.xml --allowlist osv-allowlist.toml
@@ -47,6 +47,7 @@ class Finding:
 @dataclasses.dataclass(frozen=True)
 class AllowEntry:
     id: str
+    package: str
     reason: str
     expires: datetime.date
 
@@ -134,10 +135,11 @@ def load_allowlist(text: str, today: datetime.date) -> tuple[list[AllowEntry], l
         problems.append(f"allowlist: unknown top-level key(s) {sorted(unknown_top)}")
     for i, raw in enumerate(data.get("ignore", []), 1):
         where = f"allowlist entry {i}"
-        extra = set(raw) - {"id", "reason", "expires"}
+        extra = set(raw) - {"id", "package", "reason", "expires"}
         if extra:
             problems.append(f"{where}: unknown key(s) {sorted(extra)}")
         vid = str(raw.get("id", "")).strip()
+        pkg = str(raw.get("package", "")).strip()
         reason = str(raw.get("reason", "")).strip()
         expires = raw.get("expires")
         if isinstance(expires, str):
@@ -149,6 +151,8 @@ def load_allowlist(text: str, today: datetime.date) -> tuple[list[AllowEntry], l
             expires = expires.date()
         if not vid:
             problems.append(f"{where}: id is required")
+        if ":" not in pkg:
+            problems.append(f"{where} ({vid}): package = \"group:artifact\" is required (scopes the entry)")
         if len(reason) < 10:
             problems.append(f"{where} ({vid}): reason is required (a real justification)")
         if not isinstance(expires, datetime.date):
@@ -157,20 +161,19 @@ def load_allowlist(text: str, today: datetime.date) -> tuple[list[AllowEntry], l
         if expires < today:
             problems.append(f"{where} ({vid}): expired on {expires}; re-assess, upgrade or renew with a new reason")
             continue
-        if vid and len(reason) >= 10:
-            entries.append(AllowEntry(vid, reason, expires))
+        if vid and ":" in pkg and len(reason) >= 10:
+            entries.append(AllowEntry(vid, pkg, reason, expires))
     return entries, problems
 
 
 def decide(found: list[Finding], allow: list[AllowEntry], runtime: set[str] | None) -> Decision:
-    allowed_ids = {e.id for e in allow}
     rows = []
     for f in found:
         if runtime is None:
             scope = "unknown scope"
         else:
             scope = "runtime (ships in APK)" if f.package in runtime else "build/test only"
-        if allowed_ids & (set(f.ids) | set(f.aliases)):
+        if any(e.package == f.package and e.id in (set(f.ids) | set(f.aliases)) for e in allow):
             action = "ALLOWLISTED"
         elif f.severity in BLOCKING:
             action = "BLOCK"

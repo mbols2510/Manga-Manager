@@ -2,9 +2,48 @@
 #
 # The scan fails on HIGH or CRITICAL findings (and on findings without any severity). Only add an entry when the
 # dependency cannot be upgraded yet (for example a build-time-only artifact pinned by the Android Gradle Plugin)
-# and say why it is acceptable. Every entry needs all three keys; an expired entry fails the scan again.
+# and say why it is acceptable. Every entry needs all four keys (the entry only matches that one package); an expired entry fails the scan again.
 #
 # [[ignore]]
 # id = "GHSA-xxxx-xxxx-xxxx"        # OSV/GHSA/CVE id or alias
+# package = "group:artifact"         # the Maven module it is reported on
 # reason = "Build-time only (pulled in by AGP lint), never packaged; no fixed release yet."
 # expires = 2027-02-01               # re-assess by this date (keep it within about 3 months)
+
+# ---- Entries (added 2026-11-08, first scan: CI run 42450138506) ----
+# All five are in the BUILD/TEST toolchain only: transitive dependencies of the pinned Android Gradle Plugin
+# 9.4.1 (lint, R8, aapt2 and signing tooling), the Kotlin/KSP compiler plugins and Robolectric 4.17. None is on
+# releaseRuntimeClasspath, so none is packaged in the APK (osv_scan.py labels them "build/test only"). They only
+# run on CI and developer machines, against this repository's own sources and inputs. Overriding AGP's
+# transitive versions could break the toolchain and needs a verification-metadata regeneration; the fix is
+# to take AGP/Kotlin/Robolectric updates (Dependabot) and drop these entries when the scan no longer reports them.
+
+[[ignore]]
+id = "GHSA-xxph-c9ww-hj94"  # CVE-2026-102554, HIGH 8.2, 33.2.1/33.4.0/33.6.0-jre
+package = "com.google.guava:guava"
+reason = "Build/test toolchain only (AGP 9.4.1 / Kotlin / Robolectric transitive), not in releaseRuntimeClasspath, never packaged in the APK."
+expires = 2027-02-08
+
+[[ignore]]
+id = "GHSA-3677-xxcr-wjqv"  # CVE-2024-29371, HIGH 7.5, 0.9.5
+package = "org.bitbucket.b_c:jose4j"
+reason = "Build/test toolchain only (AGP 9.4.1 / Kotlin / Robolectric transitive), not in releaseRuntimeClasspath, never packaged in the APK."
+expires = 2027-02-08
+
+[[ignore]]
+id = "GHSA-9pwp-9qqc-pr26"  # CVE-2026-8763, CRITICAL 9.3, 1.80.2
+package = "org.bouncycastle:bcprov-jdk18on"
+reason = "Build/test toolchain only (AGP 9.4.1 / Kotlin / Robolectric transitive), not in releaseRuntimeClasspath, never packaged in the APK."
+expires = 2027-02-08
+
+[[ignore]]
+id = "GHSA-qp49-qgx5-5m26"  # CVE-2026-13506, HIGH 8.7, 1.80.2
+package = "org.bouncycastle:bcprov-jdk18on"
+reason = "Build/test toolchain only (AGP 9.4.1 / Kotlin / Robolectric transitive), not in releaseRuntimeClasspath, never packaged in the APK."
+expires = 2027-02-08
+
+[[ignore]]
+id = "GHSA-2363-cqg2-863c"  # CVE-2021-33813, HIGH 7.5, 2.0.6
+package = "org.jdom:jdom2"
+reason = "Build/test toolchain only (AGP 9.4.1 / Kotlin / Robolectric transitive), not in releaseRuntimeClasspath, never packaged in the APK."
+expires = 2027-02-08

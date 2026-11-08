@@ -269,7 +269,8 @@ def find_build_tools(explicit: str | None) -> str:
 
 
 def _run(cmd: list[str]) -> tuple[int, str]:
-    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    # dexdump prints raw string constants, which need not be valid UTF-8.
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     return p.returncode, p.stdout
 
 

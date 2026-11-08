@@ -264,6 +264,14 @@ class AllowlistSyncTest(unittest.TestCase):
         self.assertEqual(kotlin, apk_check.allowed_permissions(APP))
 
 
+class ToolRunTests(unittest.TestCase):
+    def test_non_utf8_tool_output_does_not_crash(self):
+        # dexdump prints raw string constants; CI run 42450138506 crashed on byte 0xc0.
+        code, out = apk_check._run([sys.executable, "-c", "import sys; sys.stdout.buffer.write(b'ok\\xc0\\x80end')"])
+        self.assertEqual(code, 0)
+        self.assertTrue(out.startswith("ok") and out.endswith("end"))
+
+
 class SignatureTests(unittest.TestCase):
     def test_signature_required_and_missing_fails(self):
         problems = apk_check.signature_problems(expect_signed=True, verify_exit=1, verify_output="DOES NOT VERIFY")

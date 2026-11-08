@@ -131,6 +131,9 @@ redirects to the login page. POST requests from another site are refused.
 
 All links in the page are relative, so it also works behind a reverse proxy on a sub-path.
 
+The Android companion app uses a separate, token-authenticated API under `/api/v1`; see
+[api-v1.md](api-v1.md).
+
 ## Files in `data/`
 
 | Path | What |

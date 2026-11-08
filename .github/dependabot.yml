@@ -1,0 +1,29 @@
+# Dependabot version updates (spec 7.7).
+#
+# IMPORTANT for the gradle ecosystem: Dependabot does NOT regenerate android/gradle/verification-metadata.xml.
+# A Gradle dependency PR therefore fails the Android workflow (strict dependency verification) until the
+# checksums are regenerated. Pair every such PR with the write_verification_metadata flow described in
+# README.md, "Android app" > "Dependency updates": run the Android workflow on the PR branch with
+# write_verification_metadata=true, review the regenerated file, commit it to the PR branch, re-run.
+version: 2
+updates:
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      android-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "build(android)"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: "ci"
