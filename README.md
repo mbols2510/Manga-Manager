@@ -106,6 +106,13 @@ and has no analytics or third-party SDKs.
 [android/BATTERY.md](android/BATTERY.md) has the 24-hour `adb` measurement procedure and an empty results
 table. That measurement has not been run yet.
 
+**Verification status.** The app has **never run on a real device or an emulator**. It has been checked only by
+JVM unit tests (Robolectric, Android 14 sandbox) and CI builds. Not verified on a device: the Keystore token
+store, notifications (including the lock-screen public versions and the permission prompt), Doze and reboot
+behaviour, and battery use (the measurement above has not been run). The signed `android-v*` release path has
+never run: no signing secrets are configured and nothing has been published. CI_STATE_PLACEHOLDER The QR code
+and the clipboard button on the dashboard's Devices card have not been tried in a browser.
+
 ### Install
 
 1. Download `app-release.apk` and `app-release.apk.sha256` from a GitHub Release tagged `android-vX.Y.Z`.
