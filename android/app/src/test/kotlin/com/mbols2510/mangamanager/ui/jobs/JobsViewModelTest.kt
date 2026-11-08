@@ -260,4 +260,36 @@ class JobsViewModelTest {
         assertTrue(capped.endsWith("…"))
         assertEquals("short", com.mbols2510.mangamanager.ui.common.boundedServerText("  short \n"))
     }
+
+    private fun assertNoLoneSurrogate(text: String) {
+        var i = 0
+        while (i < text.length) {
+            val c = text[i]
+            if (Character.isHighSurrogate(c)) {
+                assertTrue("high surrogate at $i is followed by a low one", i + 1 < text.length && Character.isLowSurrogate(text[i + 1]))
+                i += 2
+            } else {
+                assertFalse("lone low surrogate at $i", Character.isLowSurrogate(c))
+                i++
+            }
+        }
+    }
+
+    @Test
+    fun capping_never_splits_an_emoji() {
+        val cap = com.mbols2510.mangamanager.ui.common.MAX_SERVER_TEXT_CHARS
+        // The emoji's two UTF-16 units straddle the cut (units cap-2 and cap-1).
+        val boundary = "x".repeat(cap - 2) + "\uD83D\uDE00" + "yyy"
+        val cut = com.mbols2510.mangamanager.ui.common.boundedServerText(boundary)
+        assertNoLoneSurrogate(cut)
+        assertTrue(cut.length <= cap)
+        assertTrue(cut.endsWith("…"))
+
+        val onlyEmoji = "\uD83D\uDE00".repeat(400)
+        val cutEmoji = com.mbols2510.mangamanager.ui.common.boundedServerText(onlyEmoji)
+        assertNoLoneSurrogate(cutEmoji)
+        assertTrue(cutEmoji.length <= cap)
+        assertTrue(cutEmoji.endsWith("…"))
+        assertEquals("whole emoji only", 0, cutEmoji.dropLast(1).length % 2)
+    }
 }

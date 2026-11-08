@@ -612,4 +612,141 @@ class DoublesViewModelTest {
         assertEquals("dir/b.cbz", folderAndName("C:\\lib\\dir\\b.cbz"))
         assertEquals("", folderAndName(null))
     }
+
+    // ------------------------------------------------------------------ fix round 2: no stranded chapters
+
+    private val ch13 = chapter(13, file(130, "g.cbz", pages = 40), file(131, "h.cbz", pages = 41))
+
+    @Test
+    fun chapter_remediated_while_a_scan_is_in_flight_is_scanned_after_it_completes() = runTest(dispatcher) {
+        liveSeries(ch10, ch11, ch12)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        api.kavitaGate = CompletableDeferred()
+        vm.rescanKavita()
+        runCurrent()
+        vm.keep(11, 111) // while the scan of chapter 10 is in flight
+        advanceUntilIdle()
+        assertEquals(listOf("kavita:1:lib=1:[10=24]"), kavitaCalls())
+
+        api.kavitaGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf("kavita:1:lib=1:[10=24]", "kavita:1:lib=1:[11=19]"), kavitaCalls())
+        assertTrue(vm.state.value.pendingScans.isEmpty())
+        assertTrue(vm.state.value.scanning.isEmpty())
+        assertEquals(KavitaNotice.Done(1), vm.state.value.kavita)
+    }
+
+    @Test
+    fun last_chapter_remediated_during_a_scan_is_not_stranded() = runTest(dispatcher) {
+        liveSeries(ch10, ch11)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        api.kavitaGate = CompletableDeferred()
+        vm.rescanKavita()
+        runCurrent()
+        vm.keep(11, 110) // the last chapter: the series is gone (404) while the scan is in flight
+        advanceUntilIdle()
+        assertNull(vm.state.value.openSeriesId)
+        assertEquals(1, kavitaCalls().size)
+
+        api.kavitaGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf("kavita:1:lib=1:[10=24]", "kavita:1:lib=1:[11=20]"), kavitaCalls())
+        assertTrue("nothing stranded", vm.state.value.pendingScans.isEmpty())
+    }
+
+    @Test
+    fun late_remediate_after_leaving_the_series_triggers_a_scan() = runTest(dispatcher) {
+        liveSeries(ch10, ch11, ch12)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        api.gate = CompletableDeferred()
+        vm.keep(10, 100)
+        runCurrent()
+        assertTrue(vm.state.value.busy)
+        vm.closeSeries() // nothing is pending yet: no scan
+        advanceUntilIdle()
+        assertEquals(emptyList<String>(), kavitaCalls())
+
+        api.gate!!.complete(Unit) // the remediate lands after the user left
+        advanceUntilIdle()
+        assertEquals(listOf("kavita:1:lib=1:[10=24]"), kavitaCalls())
+        assertTrue(vm.state.value.pendingScans.isEmpty())
+    }
+
+    @Test
+    fun follow_up_scan_sends_only_the_remaining_chapters() = runTest(dispatcher) {
+        liveSeries(ch10, ch11, ch12)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(11, 111)
+        advanceUntilIdle()
+        api.gate = CompletableDeferred()
+        api.kavitaGate = CompletableDeferred()
+        vm.keep(12, 121) // in flight
+        runCurrent()
+        vm.closeSeries() // scans chapter 11 only; it is in flight too
+        runCurrent()
+        assertEquals(listOf("kavita:1:lib=1:[11=19]"), kavitaCalls())
+
+        api.gate!!.complete(Unit) // chapter 12 recorded while the scan is in flight: no second scan yet
+        advanceUntilIdle()
+        assertEquals(1, kavitaCalls().size)
+        assertEquals(listOf(KavitaScanChapter(11, 19), KavitaScanChapter(12, 31)), vm.state.value.pendingScans.getValue(1).chapters)
+
+        api.kavitaGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf("kavita:1:lib=1:[11=19]", "kavita:1:lib=1:[12=31]"), kavitaCalls())
+        assertTrue(vm.state.value.pendingScans.isEmpty())
+    }
+
+    @Test
+    fun no_follow_up_scan_after_a_failed_or_maybe_applied_scan() = runTest(dispatcher) {
+        liveSeries(ch10, ch11, ch12, ch13)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(10, 100)
+        advanceUntilIdle()
+
+        api.kavitaHandler = { _, _ -> errorResponse(502) }
+        api.kavitaGate = CompletableDeferred()
+        vm.rescanKavita()
+        runCurrent()
+        vm.keep(11, 111)
+        advanceUntilIdle()
+        api.kavitaGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("a failed scan is not followed up", 1, kavitaCalls().size)
+        assertTrue(vm.state.value.kavita is KavitaNotice.Failed)
+
+        api.kavitaHandler = { _, _ -> throw SocketTimeoutException("timeout") }
+        api.kavitaGate = CompletableDeferred()
+        vm.rescanKavita()
+        runCurrent()
+        vm.keep(12, 121)
+        advanceUntilIdle()
+        api.kavitaGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("a maybe-applied scan is not followed up", 2, kavitaCalls().size)
+        assertEquals(KavitaNotice.MaybeApplied(1), vm.state.value.kavita)
+        assertEquals(
+            listOf(KavitaScanChapter(10, 24), KavitaScanChapter(11, 19), KavitaScanChapter(12, 31)),
+            vm.state.value.pendingScans.getValue(1).chapters,
+        )
+    }
 }
