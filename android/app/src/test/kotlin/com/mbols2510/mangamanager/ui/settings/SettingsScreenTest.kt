@@ -12,6 +12,7 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -103,6 +104,10 @@ class SettingsScreenTest {
     private fun denyNotifications() = shadowOf(rule.activity.application).denyPermissions(Manifest.permission.POST_NOTIFICATIONS)
 
     private fun grantNotifications() = shadowOf(rule.activity.application).grantPermissions(Manifest.permission.POST_NOTIFICATIONS)
+
+    /** Drains the activities started so far and returns their actions, oldest first. */
+    private fun startedActions(): List<String?> =
+        generateSequence { shadowOf(rule.activity).nextStartedActivity }.map { it.action }.toList()
 
     /** Pause and resume the activity: the screen re-reads the notification state on ON_RESUME. */
     private fun pauseAndResume() {
@@ -298,6 +303,29 @@ class SettingsScreenTest {
     }
 
     @Test
+    fun quiet_hours_time_rows_open_a_time_picker_dialog() {
+        val night = SettingsViewModel.DEFAULT_QUIET_HOURS
+        val settings = FakeSettingsStore("https://manga.example.com/", checkSettings = CheckSettings.DEFAULT.copy(quietHours = night))
+        show(vm(settings, status = { STATUS_ON }))
+
+        tag(SettingsTestTags.QUIET_START).assertHasClickAction().performClick()
+        waitForText(string(R.string.settings_quiet_start_title))
+        rule.onNodeWithText(string(R.string.action_cancel)).performClick()
+        rule.waitForIdle()
+        rule.onAllNodesWithText(string(R.string.settings_quiet_start_title)).assertCountEquals(0)
+        assertEquals(night, runBlocking { settings.checkSettings() }.quietHours)
+
+        // Confirming keeps a range that wraps midnight (22:00-07:00) as it is.
+        tag(SettingsTestTags.QUIET_END).performClick()
+        waitForText(string(R.string.settings_quiet_end_title))
+        rule.onNodeWithText(string(R.string.action_ok)).performClick()
+        rule.waitForIdle()
+        rule.onAllNodesWithText(string(R.string.settings_quiet_end_title)).assertCountEquals(0)
+        assertEquals(night, runBlocking { settings.checkSettings() }.quietHours)
+        assertTrue("an unchanged range is not re-applied", scheduler.calls.isEmpty())
+    }
+
+    @Test
     fun last_successful_check_never_when_null_and_live_updates() {
         val settings = FakeSettingsStore("https://manga.example.com/")
         show(vm(settings, status = { STATUS_ON }))
@@ -339,7 +367,10 @@ class SettingsScreenTest {
         val request = shadowOf(rule.activity).lastRequestedPermission
         assertTrue(Manifest.permission.POST_NOTIFICATIONS in request.requestedPermissions)
         assertTrue(settings.permissionRequested)
-        assertNull(shadowOf(rule.activity).nextStartedActivity)
+        // Robolectric calls through to Activity.requestPermissions, which starts the system prompt
+        // (PackageManager.ACTION_REQUEST_PERMISSIONS, a system API). Nothing else may start: no notification settings.
+        val started = startedActions()
+        assertTrue("only the system prompt started: $started", started.all { it == REQUEST_PERMISSIONS_ACTION })
 
         // The user denies in the system dialog: the result goes back through the Activity Result API.
         rule.runOnUiThread {
@@ -358,6 +389,7 @@ class SettingsScreenTest {
             assertEquals(rule.activity.packageName, intent.getStringExtra(Settings.EXTRA_APP_PACKAGE))
         }
         assertSame("the permission was requested only once", request, shadowOf(rule.activity).lastRequestedPermission)
+        assertTrue("no second system prompt", startedActions().isEmpty())
     }
 
     @Test
@@ -399,6 +431,7 @@ class SettingsScreenTest {
 
     private companion object {
         const val PAIRING = "pairing-slot"
+        const val REQUEST_PERMISSIONS_ACTION = "android.content.pm.action.REQUEST_PERMISSIONS"
         val STATUS_ON = NotificationStatus(runtimePermission = true, permissionGranted = true, appNotificationsEnabled = true, updateChannelBlocked = false)
     }
 }

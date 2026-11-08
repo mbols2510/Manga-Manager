@@ -10,13 +10,6 @@ import androidx.work.WorkManager
 import com.mbols2510.mangamanager.data.CheckSettings
 import java.util.concurrent.TimeUnit
 
-/**
- * The ONE unique periodic background check (spec 6). No expedited work, no foreground service, no alarms.
- *
- * [apply] enqueues [UNIQUE_WORK_NAME] with [ExistingPeriodicWorkPolicy.UPDATE]: an existing schedule keeps its
- * enqueue time and period count (WorkManager copies them into the updated spec), so calling it on every app start
- * does not push the next run back; only changed parameters take effect. `intervalMinutes == null` cancels instead.
- */
 /** What Settings and app start need from the scheduler; [Scheduler] is the WorkManager implementation (test seam). */
 interface CheckScheduler {
     /** Idempotent: an unchanged schedule keeps its timing; a null interval cancels. */
@@ -25,6 +18,13 @@ interface CheckScheduler {
     fun cancel()
 }
 
+/**
+ * The ONE unique periodic background check (spec 6). No expedited work, no foreground service, no alarms.
+ *
+ * [apply] enqueues [UNIQUE_WORK_NAME] with [ExistingPeriodicWorkPolicy.UPDATE]: an existing schedule keeps its
+ * enqueue time and period count (WorkManager copies them into the updated spec), so calling it on every app start
+ * does not push the next run back; only changed parameters take effect. `intervalMinutes == null` cancels instead.
+ */
 class Scheduler(private val workManager: WorkManager) : CheckScheduler {
 
     override fun apply(settings: CheckSettings) {

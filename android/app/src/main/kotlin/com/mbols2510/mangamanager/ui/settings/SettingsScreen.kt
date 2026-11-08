@@ -40,6 +40,7 @@ import androidx.compose.material3.TimePicker
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberUpdatedState
@@ -313,7 +314,7 @@ private fun ChecksSection(
     }
     Text(inEffect, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag(SettingsTestTags.IN_EFFECT))
 
-    val locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
+    val locale = currentLocale()
     val lastCheck = state.lastSuccessfulCheckAt?.let { formatEpochMillis(it, locale) }
         ?: stringResource(R.string.settings_last_check_never)
     Text(
@@ -383,10 +384,15 @@ private fun SwitchRow(
     }
 }
 
+/** The UI locale, read through [LocalConfiguration] so a locale change recomposes (lint NonObservableLocale). */
+@Composable
+@ReadOnlyComposable
+private fun currentLocale(): Locale = LocalConfiguration.current.locales[0] ?: Locale.ROOT
+
 @Composable
 private fun formatTime(time: LocalTime): String {
     val context = LocalContext.current
-    val locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
+    val locale = currentLocale()
     val skeleton = if (DateFormat.is24HourFormat(context)) "Hm" else "hma"
     return DateTimeFormatter.ofPattern(DateFormat.getBestDateTimePattern(locale, skeleton), locale).format(time)
 }
