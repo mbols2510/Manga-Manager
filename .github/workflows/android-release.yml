@@ -1,17 +1,21 @@
 name: Android release
 
-# Two modes, decided by the triggering event only (there is no input that can switch modes):
+# Three jobs, the same topology in both modes; the mode is decided by the triggering event only (there is no
+# input that can switch it):
 #
-#  * RELEASE: a pushed tag android-vX.Y.Z (pushed deliberately by the maintainer). The tagged commit is built and
-#    checked WITHOUT secrets, exactly like a dry run; only then one step signs the finished APK with apksigner
-#    (tools/sign_apk.sh), the signed APK is checked again, and it is attached with its SHA-256 to a GitHub
-#    Release. Gradle never runs with the secrets. Only the "publish" job has contents: write, and it runs no
-#    project code.
-#  * DRY RUN: workflow_dispatch, or a push to feature/** that touches this workflow or android/tools. Builds the
-#    UNSIGNED release APK, runs the same checks and uploads the APK and its SHA-256 as a workflow artifact.
-#    No secrets are referenced by any step that runs in this mode and nothing is published.
+#  build    no secrets anywhere. Checks out the commit, runs tests, lint, hardening, the merged-manifest check,
+#           assembleRelease, the APK checks on the UNSIGNED APK and the OSV scan, and uploads only the unsigned
+#           APK, its R8 mapping and their checksums (artifact android-release-unsigned).
+#  sign     a FRESH runner that never runs Gradle or anything the build job produced except the downloaded
+#           artifact, whose checksums it verifies. Sparse checkout of android/tools only, pinned build-tools.
+#           RELEASE: the only step that references secrets signs the APK with apksigner (tools/sign_apk.sh);
+#           the signed APK is checked again and uploaded with its SHA-256 (artifact android-release).
+#           DRY RUN: a signing rehearsal with a throwaway key generated in the job; nothing is uploaded.
+#  publish  tag pushes only, contents: write, no checkout: downloads the signed artifact, re-verifies the
+#           SHA-256 and creates the GitHub Release.
 #
-# pull_request is deliberately not a trigger, so no fork or PR can reach the signing secrets.
+# RELEASE = a pushed tag android-vX.Y.Z (pushed deliberately by the maintainer). DRY RUN = workflow_dispatch, or a
+# push to feature/** that touches this workflow or android/tools. pull_request is deliberately not a trigger.
 # Secrets: ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
 # (see README "Android app" > "Release signing").
 
@@ -34,7 +38,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build and check (${{ startsWith(github.ref, 'refs/tags/android-v') && 'signed release' || 'dry run, unsigned' }})
+    name: Build and check without secrets (${{ startsWith(github.ref, 'refs/tags/android-v') && 'release' || 'dry run' }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -79,7 +83,6 @@ jobs:
           cache-disabled: true
 
       - name: Build release, unsigned (tests, lint, hardening, merged manifest; no secrets)
-        # Both modes build exactly the same way, without any signing secret in the environment.
         run: ./gradlew --no-daemon --stacktrace verifyReleaseHardening checkReleaseMergedManifest testDebugUnitTest lintDebug assembleRelease
 
       - name: Stop Gradle daemons
@@ -90,12 +93,68 @@ jobs:
         if: env.RELEASE != 'true'
         run: tools/release_checks.sh build/release-out
 
-      - name: APK checks on the unsigned APK, OSV dependency vulnerability scan (release)
+      - name: APK checks on the unsigned APK, OSV dependency vulnerability scan, SHA-256 (release)
         if: env.RELEASE == 'true'
         run: tools/release_checks.sh build/release-out --expect-version "$EXPECT_VERSION"
 
-      - name: Signing rehearsal with a throwaway key (dry run only; result is discarded)
-        # Exercises tools/sign_apk.sh (apksigner, zipalign, verify) and the signed-APK checks without any secret.
+      - name: Upload the unsigned APK, its R8 mapping and their checksums
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: android-release-unsigned
+          path: |
+            android/build/release-out/app-release-unsigned.apk
+            android/build/release-out/app-release-unsigned.apk.sha256
+            android/build/release-out/mapping.txt
+            android/build/release-out/mapping.txt.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  sign:
+    name: Sign on a fresh runner (${{ startsWith(github.ref, 'refs/tags/android-v') && 'release' || 'rehearsal with a throwaway key' }})
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      RELEASE: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v') }}
+      # Exact build-tools directory for apksigner, zipalign, aapt2 and dexdump (never "the highest installed").
+      BUILD_TOOLS_VERSION: "37.0.0"
+    steps:
+      # Only the scripts of the same commit; no Gradle, no Java/Gradle setup, no caches in this job.
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: android/tools
+
+      - uses: actions/download-artifact@v8.0.2
+        with:
+          name: android-release-unsigned
+          path: unsigned
+
+      - name: Verify the checksums of the downloaded build
+        working-directory: unsigned
+        run: sha256sum -c app-release-unsigned.apk.sha256 mapping.txt.sha256
+
+      - name: Runner and pinned build-tools
+        run: |
+          echo "runner: $RUNNER_NAME ($ImageOS $ImageVersion)"
+          echo "pinned build-tools: $BUILD_TOOLS_VERSION"
+          ls "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/zipalign"
+
+      - name: Release tag must be android-vX.Y.Z
+        if: env.RELEASE == 'true'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#android-v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::tag must look like android-vX.Y.Z"
+            exit 1
+          fi
+          echo "EXPECT_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Signing rehearsal with a throwaway key (dry run only; never uploaded)
         if: env.RELEASE != 'true'
         env:
           ANDROID_KEYSTORE_PASSWORD: rehearsal-only-not-a-secret
@@ -107,10 +166,8 @@ jobs:
             -keyalg RSA -keysize 2048 -validity 1 -dname "CN=Signing rehearsal, O=Not for release" \
             -storepass:env ANDROID_KEYSTORE_PASSWORD -keypass:env ANDROID_KEY_PASSWORD
           KEYSTORE_BASE64=$(base64 -w0 "$RUNNER_TEMP/rehearsal.keystore") \
-            tools/sign_apk.sh build/release-out/app-release-unsigned.apk build/rehearsal/app-release.apk
+            android/tools/sign_apk.sh unsigned/app-release-unsigned.apk signed/app-release.apk
           rm -f "$RUNNER_TEMP/rehearsal.keystore"
-          tools/release_checks.sh build/rehearsal --apk build/rehearsal/app-release.apk --no-osv --expect-signed
-          rm -rf build/rehearsal
 
       - name: Sign the release APK with apksigner (the only step with secrets)
         if: env.RELEASE == 'true'
@@ -119,58 +176,37 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: tools/sign_apk.sh build/release-out/app-release-unsigned.apk build/release-signed/app-release.apk
+        run: android/tools/sign_apk.sh unsigned/app-release-unsigned.apk signed/app-release.apk
 
       - name: Remove the signing keystore
         if: always()
         run: rm -f "$RUNNER_TEMP/release.keystore" "$RUNNER_TEMP/rehearsal.keystore"
 
-      - name: APK checks on the signed APK, SHA-256 (release)
+      - name: APK checks on the signed APK (release)
         if: env.RELEASE == 'true'
-        run: tools/release_checks.sh build/release-signed --apk build/release-signed/app-release.apk --no-osv --expect-signed --expect-version "$EXPECT_VERSION"
+        run: python3 android/tools/apk_check.py --apk signed/app-release.apk --mapping unsigned/mapping.txt --build-tools "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" --expect-signed --expect-version "$EXPECT_VERSION"
 
-      - name: Upload unsigned APK and SHA-256 (dry run)
+      - name: APK checks on the rehearsal-signed APK (dry run)
         if: env.RELEASE != 'true'
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: android-release-dry-run-unsigned
-          path: |
-            android/build/release-out/*.apk
-            android/build/release-out/*.apk.sha256
-          if-no-files-found: error
-          retention-days: 14
+        run: python3 android/tools/apk_check.py --apk signed/app-release.apk --mapping unsigned/mapping.txt --build-tools "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" --expect-signed
 
-      - name: Upload signed APK and SHA-256 (release)
+      - name: SHA-256 of the signed APK
+        working-directory: signed
+        run: sha256sum app-release.apk > app-release.apk.sha256 && cat app-release.apk.sha256
+
+      - name: Upload the signed APK and its SHA-256 (release)
         if: env.RELEASE == 'true'
         uses: actions/upload-artifact@v7.0.2
         with:
           name: android-release
           path: |
-            android/build/release-signed/app-release.apk
-            android/build/release-signed/app-release.apk.sha256
+            signed/app-release.apk
+            signed/app-release.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
-  verify-artifact:
-    # Runs in both modes, so the artifact hand-over used by "publish" is exercised by every dry run.
-    needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/download-artifact@v8.0.2
-        with:
-          name: ${{ (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')) && 'android-release' || 'android-release-dry-run-unsigned' }}
-          path: dist
-      - name: Verify SHA-256 of the downloaded artifact
-        working-directory: dist
-        run: |
-          ls -l
-          sha256sum -c ./*.sha256
-
   publish:
-    needs: [build, verify-artifact]
+    needs: sign
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
     runs-on: ubuntu-latest
     timeout-minutes: 10

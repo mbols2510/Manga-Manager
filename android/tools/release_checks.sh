@@ -9,7 +9,8 @@
 # --no-osv skips the dependency scan (already run on the unsigned build of the same commit).
 #
 # Writes into <out-dir>: the release APK (app-release.apk when signed, app-release-unsigned.apk otherwise),
-# <apk>.sha256 in `sha256sum -c` format, and release-runtime-deps.txt. Runs every check even when an earlier one
+# <apk>.sha256 in `sha256sum -c` format, release-runtime-deps.txt and, without --apk, the R8 mapping.txt with
+# mapping.txt.sha256. Runs every check even when an earlier one
 # failed, then exits 1 if any failed.
 set -euo pipefail
 
@@ -21,11 +22,12 @@ out=$1
 shift
 apk_args=()
 apk=""
+apk_given=""
 osv=true
 while [ $# -gt 0 ]; do
   case "$1" in
     --expect-signed) apk_args+=(--expect-signed) ;;
-    --apk) apk=$2; shift ;;
+    --apk) apk=$2; apk_given=yes; shift ;;
     --no-osv) osv=false ;;
     --expect-version) apk_args+=(--expect-version "$2"); shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -73,6 +75,11 @@ echo "== SHA-256"
 name=$(basename "$apk")
 if [ "$(realpath "$apk")" != "$(realpath -m "$out/$name")" ]; then cp "$apk" "$out/$name"; fi
 (cd "$out" && sha256sum "$name" > "$name.sha256" && cat "$name.sha256")
+if [ -z "$apk_given" ]; then
+  # The sign job re-runs apk_check.py on the signed APK and needs the R8 mapping of this same build.
+  cp app/build/outputs/mapping/release/mapping.txt "$out/mapping.txt"
+  (cd "$out" && sha256sum mapping.txt > mapping.txt.sha256 && cat mapping.txt.sha256)
+fi
 
 if [ "$status" -ne 0 ]; then
   echo "Release checks FAILED"
