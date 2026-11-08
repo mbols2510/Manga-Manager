@@ -213,13 +213,13 @@
     <string name="jobs_job_last_error">Last error: %1$s</string>
     <!-- Settings (Task 12). The server URL is shown read-only; the token is never shown. -->
     <string name="settings_repair_title">This device must be paired again</string>
-    <string name="settings_repair_text">The server rejected this device's token, so background checks are paused. Create a new pairing code on the server and pair again.</string>
+    <string name="settings_repair_text">The server rejected this device\'s token, so background checks are paused. Create a new pairing code on the server and pair again.</string>
     <string name="settings_repair_action">Re-pair this device</string>
     <string name="settings_server_title">Server</string>
     <string name="settings_server_none">Not paired</string>
     <string name="settings_encrypted">Encrypted connection (HTTPS)</string>
     <string name="settings_unencrypted_title">Unencrypted connection</string>
-    <string name="settings_unencrypted_text">This server is reached over plain HTTP. Anyone on the same network can read this device's token and your updates. Use HTTPS or a VPN such as Tailscale if you can.</string>
+    <string name="settings_unencrypted_text">This server is reached over plain HTTP. Anyone on the same network can read this device\'s token and your updates. Use HTTPS or a VPN such as Tailscale if you can.</string>
     <string name="settings_unpair">Unpair / pair another server</string>
     <string name="settings_unpairing">Unpairing…</string>
     <string name="settings_unpair_confirm_title">Unpair this device?</string>
