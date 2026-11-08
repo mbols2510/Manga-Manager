@@ -91,7 +91,7 @@ Show the Room cache immediately, refresh once on open and on pull-to-refresh. No
 ### 5.3 Failure handling
 | Situation | Behaviour |
 |---|---|
-| Unreachable server, VPN off, timeout | `Result.retry()` with exponential backoff, silent. Settings shows last successful check |
+| Unreachable server, VPN off, timeout | `Result.retry()` once per period (WorkManager exponential backoff for that single retry), then wait for the next period, silent. Settings shows last successful check |
 | Offline for days | Cursor unchanged. Next success pages through everything |
 | `401` (revoked) | Cancel periodic work, one "Re-pair this device" notification, no retry loop |
 | `410` or cursor reset | Fetch `changes/latest` as a new baseline and **do not notify** for older items |
@@ -104,8 +104,8 @@ Show the Room cache immediately, refresh once on open and on pull-to-refresh. No
 - The app's own code and source manifest use no foreground service, wake locks, exact alarms or custom receivers. One unique `PeriodicWorkRequest`. WorkManager's own merged-in `WAKE_LOCK` and `RECEIVE_BOOT_COMPLETED` (so the periodic job survives reboots) are accepted; its `FOREGROUND_SERVICE` permission and `SystemForegroundService` are stripped, so expedited and foreground work are not allowed.
 - Interval: default 30 min, range 15 min – 6 h, or off. Flex about 25%. Optional night stretch to 2 h during quiet hours.
 - Constraints: `CONNECTED` (or `UNMETERED` when Wi-Fi only) and `requiresBatteryNotLow`.
-- Exponential backoff capped at the interval. 10 s connect, 15 s read timeouts.
-- ETag/`304`; no Room write when nothing changed.
+- After a failed check: one retry per period (WorkManager exponential backoff, 30 s initial delay, for that single retry); after that the job waits for the next period (ruling 22). 10 s connect, 15 s read timeouts.
+- ETag/`304`; no Room write when nothing changed (one small DataStore write records the last successful check time).
 - Covers load only while visible, Coil memory and disk caches with a size cap, no background prefetch.
 
 ## 7. Security

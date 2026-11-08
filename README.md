@@ -96,8 +96,9 @@ and has no analytics or third-party SDKs.
 - One WorkManager periodic job (`manga_update_check`), every 30 min by default (15 min to 6 h, or off). It
   needs a network and a battery that is not low.
 - The app has no foreground service, no alarms and no wake locks of its own.
-- A check is one request with an ETag. When nothing changed, the server answers `304` and the app writes
-  nothing and stays quiet.
+- A check is one request with an ETag. When nothing changed, the server answers `304`: the app writes nothing
+  to its database and posts nothing; it only records the time of the successful check (one small settings
+  write).
 - After a failure the job retries once, then waits for the next period.
 - *Wi-Fi only* and *Quiet hours* (no alerts; with *Slow down at night*, at most one check every 2 h) cut use
   further.

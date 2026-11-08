@@ -12,8 +12,8 @@ These points come from `work/Scheduler.kt` and `work/CheckWorker.kt`:
   default, can be set from 15 min to 6 h, or turned off. Flex is about a quarter of the interval and never less
   than 5 min.
 - The job's constraints are: network `CONNECTED` (or `UNMETERED` with *Wi-Fi only*) and battery not low.
-- Each run sends one `GET /api/v1/changes` with an `ETag`. A `304` ends the run with no database write and no
-  notification.
+- Each run sends one `GET /api/v1/changes` with an `ETag`. A `304` ends the run with no Room (database) write and
+  no notification; the only write is one small DataStore value, the time of the last successful check.
 - After a failure the job retries once, 30 s later (exponential backoff). After that it waits for the next
   period.
 - The app has no foreground service, no expedited work and no alarms of its own, and its own code takes no wake

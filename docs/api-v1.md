@@ -1,8 +1,9 @@
 # Manga Manager API for the Android companion (v1)
 
-This describes how a companion client authenticates and which endpoints it may call. Everything here requires
-dashboard login to be enabled (`web.auth.enabled`): without it the API is open to anyone and device tokens
-are refused (`409`).
+This describes how a companion client authenticates and which endpoints it may call. Device tokens only make
+sense with dashboard login enabled (`web.auth.enabled`). Without it the whole API is open to anyone: every
+request passes unauthenticated (a bearer header is not checked at all), and only the device management
+endpoints `/api/v1/devices` refuse with `409`, so no device can be created, listed or revoked.
 
 ## Authentication
 
