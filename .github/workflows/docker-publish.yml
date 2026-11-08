@@ -19,6 +19,8 @@ env:
 
 jobs:
   publish:
+    # Server releases only: a manually published android-v* release must not publish the server image.
+    if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7

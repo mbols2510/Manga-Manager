@@ -2,9 +2,11 @@ name: Android release
 
 # Two modes, decided by the triggering event only (there is no input that can switch modes):
 #
-#  * RELEASE: a pushed tag android-vX.Y.Z (pushed deliberately by the maintainer). The tagged commit is built,
-#    signed with the repository secrets, checked, and attached with its SHA-256 to a GitHub Release. Only the
-#    "publish" job has contents: write, and it runs no project code.
+#  * RELEASE: a pushed tag android-vX.Y.Z (pushed deliberately by the maintainer). The tagged commit is built and
+#    checked WITHOUT secrets, exactly like a dry run; only then one step signs the finished APK with apksigner
+#    (tools/sign_apk.sh), the signed APK is checked again, and it is attached with its SHA-256 to a GitHub
+#    Release. Gradle never runs with the secrets. Only the "publish" job has contents: write, and it runs no
+#    project code.
 #  * DRY RUN: workflow_dispatch, or a push to feature/** that touches this workflow or android/tools. Builds the
 #    UNSIGNED release APK, runs the same checks and uploads the APK and its SHA-256 as a workflow artifact.
 #    No secrets are referenced by any step that runs in this mode and nothing is published.
@@ -76,51 +78,76 @@ jobs:
           # Release builds never read or write a cache: every artifact is re-downloaded and verified.
           cache-disabled: true
 
-      - name: Write the signing keystore to the runner temp directory
-        if: env.RELEASE == 'true'
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: |
-          umask 077
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "::error::repository secret ANDROID_KEYSTORE_BASE64 is not set"
-            exit 1
-          fi
-          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
-
-      - name: Build signed release (tests, lint, hardening, merged manifest)
-        if: env.RELEASE == 'true'
-        env:
-          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
-          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        # No configuration cache: the signing passwords must not be stored in a cache entry.
-        run: ./gradlew --no-daemon --no-configuration-cache --stacktrace verifyReleaseHardening checkReleaseMergedManifest testDebugUnitTest lintDebug assembleRelease
-
-      - name: Remove the signing keystore
-        if: always()
-        run: rm -f "$RUNNER_TEMP/release.keystore"
-
-      - name: Build unsigned release (dry run; tests, lint, hardening, merged manifest)
-        if: env.RELEASE != 'true'
+      - name: Build release, unsigned (tests, lint, hardening, merged manifest; no secrets)
+        # Both modes build exactly the same way, without any signing secret in the environment.
         run: ./gradlew --no-daemon --stacktrace verifyReleaseHardening checkReleaseMergedManifest testDebugUnitTest lintDebug assembleRelease
 
-      - name: Release APK checks, OSV dependency vulnerability scan, SHA-256 (signed release)
-        if: env.RELEASE == 'true'
-        run: tools/release_checks.sh build/release-out --expect-signed --expect-version "$EXPECT_VERSION"
+      - name: Stop Gradle daemons
+        if: always()
+        run: ./gradlew --stop
 
-      - name: Release APK checks, OSV dependency vulnerability scan, SHA-256 (dry run)
+      - name: APK checks on the unsigned APK, OSV dependency vulnerability scan, SHA-256 (dry run)
         if: env.RELEASE != 'true'
         run: tools/release_checks.sh build/release-out
 
-      - name: Upload APK and SHA-256
+      - name: APK checks on the unsigned APK, OSV dependency vulnerability scan (release)
+        if: env.RELEASE == 'true'
+        run: tools/release_checks.sh build/release-out --expect-version "$EXPECT_VERSION"
+
+      - name: Signing rehearsal with a throwaway key (dry run only; result is discarded)
+        # Exercises tools/sign_apk.sh (apksigner, zipalign, verify) and the signed-APK checks without any secret.
+        if: env.RELEASE != 'true'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: rehearsal-only-not-a-secret
+          ANDROID_KEY_PASSWORD: rehearsal-only-not-a-secret
+          ANDROID_KEY_ALIAS: rehearsal
+        run: |
+          umask 077
+          keytool -genkeypair -keystore "$RUNNER_TEMP/rehearsal.keystore" -storetype PKCS12 -alias rehearsal \
+            -keyalg RSA -keysize 2048 -validity 1 -dname "CN=Signing rehearsal, O=Not for release" \
+            -storepass:env ANDROID_KEYSTORE_PASSWORD -keypass:env ANDROID_KEY_PASSWORD
+          KEYSTORE_BASE64=$(base64 -w0 "$RUNNER_TEMP/rehearsal.keystore") \
+            tools/sign_apk.sh build/release-out/app-release-unsigned.apk build/rehearsal/app-release.apk
+          rm -f "$RUNNER_TEMP/rehearsal.keystore"
+          tools/release_checks.sh build/rehearsal --apk build/rehearsal/app-release.apk --no-osv --expect-signed
+          rm -rf build/rehearsal
+
+      - name: Sign the release APK with apksigner (the only step with secrets)
+        if: env.RELEASE == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: tools/sign_apk.sh build/release-out/app-release-unsigned.apk build/release-signed/app-release.apk
+
+      - name: Remove the signing keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.keystore" "$RUNNER_TEMP/rehearsal.keystore"
+
+      - name: APK checks on the signed APK, SHA-256 (release)
+        if: env.RELEASE == 'true'
+        run: tools/release_checks.sh build/release-signed --apk build/release-signed/app-release.apk --no-osv --expect-signed --expect-version "$EXPECT_VERSION"
+
+      - name: Upload unsigned APK and SHA-256 (dry run)
+        if: env.RELEASE != 'true'
         uses: actions/upload-artifact@v7.0.2
         with:
-          name: ${{ env.RELEASE == 'true' && 'android-release' || 'android-release-dry-run-unsigned' }}
+          name: android-release-dry-run-unsigned
           path: |
             android/build/release-out/*.apk
             android/build/release-out/*.apk.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload signed APK and SHA-256 (release)
+        if: env.RELEASE == 'true'
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: android-release
+          path: |
+            android/build/release-signed/app-release.apk
+            android/build/release-signed/app-release.apk.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -178,6 +205,8 @@ jobs:
             echo "activities: it must never be used with a real device token."
           } > notes.md
           # --latest=false: server releases (vX.Y.Z) stay the repository's "latest release".
+          # Created with GITHUB_TOKEN, which by GitHub's rules does not start other workflows, so the release
+          # event does not trigger docker-publish.yml (which also skips non-v* tags as a second guard).
           gh release create "$TAG" --repo "$REPO" --verify-tag --latest=false \
             --title "Android app ${TAG#android-v}" --notes-file notes.md \
             app-release.apk app-release.apk.sha256

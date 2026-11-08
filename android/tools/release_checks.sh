@@ -3,7 +3,10 @@
 # .github/workflows/android.yml (every build) and .github/workflows/android-release.yml (dry run and tag release).
 # Run from android/ after `./gradlew assembleRelease`.
 #
-# usage: tools/release_checks.sh <out-dir> [--expect-signed] [--expect-version X.Y.Z]
+# usage: tools/release_checks.sh <out-dir> [--apk PATH] [--no-osv] [--expect-signed] [--expect-version X.Y.Z]
+#
+# --apk checks that APK instead of the single APK in app/build/outputs/apk/release (the signed APK);
+# --no-osv skips the dependency scan (already run on the unsigned build of the same commit).
 #
 # Writes into <out-dir>: the release APK (app-release.apk when signed, app-release-unsigned.apk otherwise),
 # <apk>.sha256 in `sha256sum -c` format, and release-runtime-deps.txt. Runs every check even when an earlier one
@@ -11,15 +14,19 @@
 set -euo pipefail
 
 if [ $# -lt 1 ]; then
-  echo "usage: tools/release_checks.sh <out-dir> [--expect-signed] [--expect-version X.Y.Z]" >&2
+  echo "usage: tools/release_checks.sh <out-dir> [--apk PATH] [--no-osv] [--expect-signed] [--expect-version X.Y.Z]" >&2
   exit 2
 fi
 out=$1
 shift
 apk_args=()
+apk=""
+osv=true
 while [ $# -gt 0 ]; do
   case "$1" in
     --expect-signed) apk_args+=(--expect-signed) ;;
+    --apk) apk=$2; shift ;;
+    --no-osv) osv=false ;;
     --expect-version) apk_args+=(--expect-version "$2"); shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
@@ -28,18 +35,21 @@ done
 mkdir -p "$out"
 status=0
 
-shopt -s nullglob
-apks=(app/build/outputs/apk/release/*.apk)
-if [ ${#apks[@]} -ne 1 ]; then
-  echo "::error::expected exactly one release APK in app/build/outputs/apk/release, found ${#apks[@]}"
-  exit 1
+if [ -z "$apk" ]; then
+  shopt -s nullglob
+  apks=(app/build/outputs/apk/release/*.apk)
+  if [ ${#apks[@]} -ne 1 ]; then
+    echo "::error::expected exactly one release APK in app/build/outputs/apk/release, found ${#apks[@]}"
+    exit 1
+  fi
+  apk=${apks[0]}
 fi
-apk=${apks[0]}
 
 echo "== APK check: $apk"
 python3 tools/apk_check.py --apk "$apk" --mapping app/build/outputs/mapping/release/mapping.txt "${apk_args[@]}" \
   || status=1
 
+if [ "$osv" = true ]; then
 echo "== Dependency vulnerability scan (OSV-Scanner over gradle/verification-metadata.xml)"
 tools_dir="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/pinned-tools"
 if scanner=$(python3 tools/fetch_pinned.py osv-scanner "$tools_dir"); then
@@ -55,10 +65,13 @@ else
   echo "::error::could not fetch the pinned osv-scanner"
   status=1
 fi
+else
+  echo "== Dependency vulnerability scan skipped (--no-osv)"
+fi
 
 echo "== SHA-256"
 name=$(basename "$apk")
-cp "$apk" "$out/$name"
+if [ "$(realpath "$apk")" != "$(realpath -m "$out/$name")" ]; then cp "$apk" "$out/$name"; fi
 (cd "$out" && sha256sum "$name" > "$name.sha256" && cat "$name.sha256")
 
 if [ "$status" -ne 0 ]; then
