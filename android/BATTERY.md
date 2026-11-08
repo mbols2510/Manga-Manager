@@ -131,8 +131,9 @@ completely. That is a device setting, not a fault in the app.
 
 1. **Too many runs or more than one job.** Copy the `dumpsys jobscheduler` block into an issue. Unpairing and
    pairing again replaces the schedule.
-2. **High mAh or many runs.** Raise the interval to 60 min or more (Settings > Background checks). Each step halves
-   the number of runs.
+2. **High mAh or many runs.** Raise the interval to 60 min or more (Settings > Background checks). At most there are
+   1440 / interval-in-minutes runs a day: 48 at 30 min, 24 at 60 min, 12 at 2 h, 4 at 6 h. Doze often makes it
+   fewer.
 3. **Mobile data use.** Turn on *Wi-Fi only*. The job then waits for an unmetered network.
 4. **Night.** Turn on *Quiet hours* with *Slow down at night*: the app makes at most one request every 2 h inside the
    quiet window, and notifications wait until it ends.

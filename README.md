@@ -142,8 +142,8 @@ cd android
 ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease
 ```
 
-You need JDK 17 and the Android SDK (compileSdk 37). Every push that touches `android/` runs
-`.github/workflows/android.yml`. That workflow covers:
+You need JDK 17 and the Android SDK (compileSdk 37). `.github/workflows/android.yml` runs on pushes to `main`
+and `feature/**` and on pull requests, whenever they touch `android/`. That workflow covers:
 - unit tests, lint, debug and release builds, with strict Gradle dependency verification;
 - release hardening and the merged-manifest allowlist;
 - checks on the built release APK, from `android/tools/apk_check.py`: not debuggable, only the allowed
@@ -184,8 +184,21 @@ gh secret set ANDROID_KEY_PASSWORD
 keytool's default PKCS12 keystore uses the same password for the store and the key, so both password secrets
 get that value.
 
-Gradle signs the release only when `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and
-`ANDROID_KEY_PASSWORD` are set in the environment. The release workflow sets them, and only on tag builds.
+CI signs with the SDK's `apksigner` (`android/tools/sign_apk.sh`), and **Gradle never receives the secrets**.
+The release build, tests and lint run without them, and only the single signing step sees them. For a local
+maintainer build, Gradle can also sign: it does so only when `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PASSWORD`,
+`ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` are set in your environment.
+
+**Recommended hardening of the tag path.** The workflow does not need any of this to run, but it narrows who can
+release:
+- Create a GitHub Environment `android-release` (**Settings > Environments**) with a required reviewer, and
+  restrict its deployments to tags matching `android-v*`. Move the four secrets into it as environment secrets.
+- Add a tag ruleset (**Settings > Rules > Rulesets**, target tags `android-v*`) that limits who may create,
+  update or delete these tags.
+- Then add `environment: android-release` to the `build` job of `android-release.yml`.
+
+Create and protect the environment *before* adding that line. A workflow that names a missing environment
+creates it automatically on first use, and the new environment is unprotected.
 
 ### Cutting a release (maintainer)
 
@@ -193,15 +206,19 @@ Gradle signs the release only when `ANDROID_KEYSTORE_PATH`, `ANDROID_KEYSTORE_PA
 2. Tag that commit `android-v<versionName>`, for example `git tag android-v0.1.0 && git push origin android-v0.1.0`.
 
 The tag starts `.github/workflows/android-release.yml`:
-- It builds the tagged commit and signs it. The keystore is written to the runner's temp directory and deleted
-  after the build.
-- It checks the APK, including `apksigner verify` and the tag/versionName match.
+- It builds and checks the tagged commit without any secret, exactly like a dry run (tests, lint, APK checks,
+  vulnerability scan).
+- Only then does one step sign the finished APK with `apksigner`. The keystore is written to the runner's temp
+  directory and deleted right after.
+- It checks the signed APK again: `apksigner verify`, zip alignment, the same APK checks and the tag/versionName
+  match.
 - It creates a GitHub Release with the APK and its SHA-256. The release is not marked "latest", so server
   releases keep that spot.
 
-Running the workflow by hand (**Run workflow**) is always a **dry run**. It builds the unsigned release, runs
-the same checks and uploads the APK and checksum as a workflow artifact. It uses no secrets and publishes
-nothing.
+Running the workflow by hand (**Run workflow**) is always a **dry run**. So is a push to `feature/**` that
+changes the workflow or `android/tools`. A dry run builds the unsigned release, runs the same checks and uploads
+the APK and checksum as a workflow artifact. It also rehearses the signing step with a throwaway key generated
+on the runner and then discards that result. It uses no secrets and publishes nothing.
 
 ## Development
 
