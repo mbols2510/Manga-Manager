@@ -293,6 +293,23 @@ class UpdatesViewModelTest {
     }
 
     @Test
+    fun a_restarted_screen_continues_from_the_cached_list_without_a_not_loaded_frame() = runTest(dispatcher) {
+        val repo = FakeFeedRepository(listOf(feedItem(2), feedItem(1)))
+        val vm = UpdatesViewModel(repo, { null })
+        val first = backgroundScope.launch { vm.state.collect {} }
+        advanceUntilIdle()
+        assertTrue(vm.state.value.loaded)
+        first.cancel()
+        advanceTimeBy(10_000) // longer than the 5 s grace: the upstream stops
+        runCurrent()
+
+        val seen = mutableListOf<UpdatesUiState>()
+        backgroundScope.launch { vm.state.collect { seen += it } }
+        advanceUntilIdle()
+        assertTrue("no loaded=false / empty frame after the restart: $seen", seen.all { it.loaded && it.items.size == 2 })
+    }
+
+    @Test
     fun thumbnail_url_resolves_against_paired_base_and_never_when_unpaired() = runTest(dispatcher) {
         val base = "https://nas.example/manga/".toHttpUrl()
         assertEquals("https://nas.example/manga/thumb/7.png", resolveThumbnail(base, "thumb/7.png"))

@@ -39,6 +39,9 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -195,12 +198,20 @@ class UpdatesScreenTest {
                 )
             }
         }
-        waitForText(PAIRING)
-        rule.onNodeWithText(PAIRING).assertIsDisplayed()
-        rule.onAllNodesWithText("Before Revoke").assertCountEquals(0)
-        assertTrue(auth.needsRepair.value)
-        assertFalse(vm.state.value.refreshing)
-        assertNull(vm.state.value.error)
+        // The Updates screen leaves composition on the 401, and `state` is shared only while subscribed
+        // (WhileSubscribed, final-review fix E): observe the ViewModel the way a screen would to check its outcome.
+        val observer = CoroutineScope(Dispatchers.Main).launch { vm.state.collect {} }
+        try {
+            waitForText(PAIRING)
+            rule.onNodeWithText(PAIRING).assertIsDisplayed()
+            rule.onAllNodesWithText("Before Revoke").assertCountEquals(0)
+            assertTrue(auth.needsRepair.value)
+            rule.waitUntil(5_000) { !vm.state.value.refreshing }
+            assertFalse(vm.state.value.refreshing)
+            assertNull(vm.state.value.error)
+        } finally {
+            observer.cancel()
+        }
     }
 
     // ------------------------------------------------------------------ controller tests

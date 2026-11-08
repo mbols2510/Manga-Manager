@@ -17,7 +17,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -65,8 +64,17 @@ class UpdatesViewModel(
     private val refreshState = MutableStateFlow(Refresh())
     private var refreshJob: Job? = null
 
+    /**
+     * The Room feed, null until it answered once. A StateFlow keeps its last list while stopped, so when [state]
+     * restarts (screen back after more than 5 s) it continues from that list instead of emitting `loaded = false`
+     * with an empty list (which would reset the scroll position). Stops as soon as [state] stops.
+     */
+    private val cachedFeed: StateFlow<List<UpdateEntity>?> = repository.feed
+        .map<List<UpdateEntity>, List<UpdateEntity>?> { it }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(), null)
+
     val state: StateFlow<UpdatesUiState> = combine(
-        repository.feed.map<List<UpdateEntity>, List<UpdateEntity>?> { it }.onStart { emit(null) },
+        cachedFeed,
         filters,
         refreshState,
     ) { cached, f, r ->
