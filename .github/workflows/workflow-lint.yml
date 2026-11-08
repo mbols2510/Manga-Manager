@@ -8,10 +8,12 @@ on:
     paths:
       - ".github/**"
       - "android/tools/fetch_pinned.py"
+      - "android/tools/test_workflows.py"
   pull_request:
     paths:
       - ".github/**"
       - "android/tools/fetch_pinned.py"
+      - "android/tools/test_workflows.py"
 
 permissions:
   contents: read
@@ -33,3 +35,5 @@ jobs:
           "$ACTIONLINT" -version
           shellcheck --version | head -n 2 || echo "shellcheck not installed: run: scripts are not shellchecked"
           "$ACTIONLINT" -color
+      - name: Workflow security invariants (secrets only on the tag path, one write job, no expressions in run:)
+        run: python3 -m unittest discover -s android/tools -p 'test_workflows.py' -v
