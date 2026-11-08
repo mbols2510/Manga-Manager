@@ -72,12 +72,12 @@ jobs:
       - name: Self-test of the APK check and vulnerability scan scripts (fixtures, no SDK)
         run: python3 -m unittest discover -s tools -p 'test_*.py' -v
 
-      - uses: actions/setup-java@v6.1.0
+      - uses: actions/setup-java@v6.2.0
         with:
           distribution: temurin
           java-version: "17"
 
-      - uses: gradle/actions/setup-gradle@v6.4.0
+      - uses: gradle/actions/setup-gradle@v6.4.1
         with:
           # Release builds never read or write a cache: every artifact is re-downloaded and verified.
           cache-disabled: true
