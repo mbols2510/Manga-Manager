@@ -26,6 +26,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -88,6 +89,9 @@ fun DoublesScreen(viewModel: DoublesViewModel, modifier: Modifier = Modifier) {
                 onKeep = viewModel::remediate,
                 onRetry = viewModel::refresh,
                 onDismissMessage = viewModel::dismissMessage,
+                onRescan = { viewModel.rescanKavita() },
+                onRetryKavita = viewModel::rescanKavita,
+                onDismissKavita = viewModel::dismissKavitaNotice,
             )
         } else {
             Overview(
@@ -96,6 +100,8 @@ fun DoublesScreen(viewModel: DoublesViewModel, modifier: Modifier = Modifier) {
                 onOpen = viewModel::openSeries,
                 onRestore = viewModel::restore,
                 onDismissMessage = viewModel::dismissMessage,
+                onRetryKavita = viewModel::rescanKavita,
+                onDismissKavita = viewModel::dismissKavitaNotice,
             )
         }
     }
@@ -112,6 +118,8 @@ private fun Overview(
     onOpen: (Long) -> Unit,
     onRestore: (String) -> Unit,
     onDismissMessage: () -> Unit,
+    onRetryKavita: (Long) -> Unit,
+    onDismissKavita: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Header(title = R.string.doubles_title, busy = state.loading || state.busy, onRefresh = onRefresh)
@@ -120,6 +128,7 @@ private fun Overview(
         Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text(stringResource(R.string.doubles_tab_trash)) })
     }
     MessageBanner(state.message, onDismissMessage)
+    KavitaBanner(state.kavita, onRetryKavita, onDismissKavita)
     if (state.unreachable && state.loaded) UnreachableBanner(onRefresh)
     LazyColumn(
         modifier = Modifier
@@ -207,7 +216,7 @@ private fun TrashRow(entry: TrashEntryDto, enabled: Boolean, onRestore: (String)
     ) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             Text(
-                text = fileName(entry.originalPath ?: entry.trashPath),
+                text = folderAndName(entry.originalPath ?: entry.trashPath),
                 style = MaterialTheme.typography.titleSmall,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -248,6 +257,9 @@ private fun SeriesDetail(
     onKeep: (Long, Long, Long) -> Unit,
     onRetry: () -> Unit,
     onDismissMessage: () -> Unit,
+    onRescan: () -> Unit,
+    onRetryKavita: (Long) -> Unit,
+    onDismissKavita: () -> Unit,
 ) {
     val detail = state.detail
     Row(
@@ -269,7 +281,20 @@ private fun SeriesDetail(
     }
     if (state.loadingDetail || state.busy) LinearProgressIndicator(Modifier.fillMaxWidth()) else HorizontalDivider()
     MessageBanner(state.message, onDismissMessage)
+    KavitaBanner(state.kavita, onRetryKavita, onDismissKavita)
     if (state.unreachable) UnreachableBanner(onRetry)
+    val open = state.openSeriesId
+    if (open != null && state.pendingScans[open]?.chapters.orEmpty().isNotEmpty()) {
+        OutlinedButton(
+            onClick = onRescan,
+            enabled = open !in state.scanning,
+            modifier = Modifier
+                .padding(horizontal = 16.dp, vertical = 4.dp)
+                .testTag(DoublesTestTags.RESCAN),
+        ) {
+            Text(stringResource(R.string.doubles_rescan_kavita))
+        }
+    }
     if (detail == null) return
     val chapters = remember(detail) { detail.chapters.sortedBy { it.sortOrder ?: 0.0 } }
     LazyColumn(Modifier.fillMaxSize()) {
@@ -355,7 +380,7 @@ private fun FileOption(file: DoubleFileDto, selected: Boolean, onClick: () -> Un
     ) {
         RadioButton(selected = selected, onClick = null)
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Text(fileName(file.filePath), style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(folderAndName(file.filePath), style = MaterialTheme.typography.bodyLarge, maxLines = 3, overflow = TextOverflow.Ellipsis)
             Text(fileFacts(file), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             val chips = listOfNotNull(
                 if (file.isOfficial) stringResource(R.string.doubles_chip_official) else null,
@@ -392,7 +417,7 @@ private fun ConfirmDialog(pending: PendingConfirm, onConfirm: () -> Unit, onDism
                     Text(displayName(pending.seriesName, pending.seriesId), style = MaterialTheme.typography.titleSmall)
                     Text(chapterLabel(pending.chapter), style = MaterialTheme.typography.bodyMedium)
                     Text(
-                        stringResource(R.string.doubles_confirm_remediate_keep, fileName(pending.keep.filePath)),
+                        stringResource(R.string.doubles_confirm_remediate_keep, folderAndName(pending.keep.filePath)),
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     Text(fileFacts(pending.keep), style = MaterialTheme.typography.bodySmall)
@@ -401,7 +426,7 @@ private fun ConfirmDialog(pending: PendingConfirm, onConfirm: () -> Unit, onDism
                         style = MaterialTheme.typography.bodyMedium,
                     )
                     pending.trash.forEach { f ->
-                        Text(fileName(f.filePath), style = MaterialTheme.typography.bodyMedium)
+                        Text(folderAndName(f.filePath), style = MaterialTheme.typography.bodyMedium)
                         Text(fileFacts(f), style = MaterialTheme.typography.bodySmall)
                     }
                     Text(stringResource(R.string.doubles_confirm_remediate_note), style = MaterialTheme.typography.bodySmall)
@@ -409,7 +434,7 @@ private fun ConfirmDialog(pending: PendingConfirm, onConfirm: () -> Unit, onDism
                 is PendingConfirm.ConfirmRestore -> Text(
                     stringResource(
                         R.string.doubles_confirm_restore_text,
-                        fileName(pending.entry.originalPath ?: pending.entry.trashPath),
+                        folderAndName(pending.entry.originalPath ?: pending.entry.trashPath),
                     ),
                 )
             }
@@ -450,6 +475,37 @@ private fun MessageBanner(message: DoublesMessage?, onDismiss: () -> Unit) {
         is DoublesMessage.ServerError -> serverErrorText(message.code, message.text)
     }
     Banner(text = text, isError = isError, onDismiss = onDismiss, tag = DoublesTestTags.MESSAGE)
+}
+
+@Composable
+private fun KavitaBanner(notice: KavitaNotice?, onRetry: (Long) -> Unit, onDismiss: () -> Unit) {
+    if (notice == null) return
+    val text = when (notice) {
+        is KavitaNotice.Scanning -> stringResource(R.string.doubles_kavita_scanning)
+        is KavitaNotice.Done -> stringResource(R.string.doubles_kavita_done)
+        is KavitaNotice.MaybeApplied -> stringResource(R.string.doubles_kavita_maybe_applied)
+        is KavitaNotice.Unreachable -> stringResource(R.string.doubles_kavita_unreachable)
+        is KavitaNotice.Failed -> stringResource(R.string.doubles_kavita_failed, serverErrorText(notice.code, notice.text))
+    }
+    val retry = notice is KavitaNotice.MaybeApplied || notice is KavitaNotice.Unreachable || notice is KavitaNotice.Failed
+    Surface(
+        color = MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = MaterialTheme.colorScheme.onTertiaryContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag(DoublesTestTags.KAVITA_NOTICE),
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(text, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            if (retry) TextButton(onClick = { onRetry(notice.seriesId) }) { Text(stringResource(R.string.action_retry)) }
+            if (notice !is KavitaNotice.Scanning) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.action_dismiss)) }
+            }
+        }
+    }
 }
 
 @Composable

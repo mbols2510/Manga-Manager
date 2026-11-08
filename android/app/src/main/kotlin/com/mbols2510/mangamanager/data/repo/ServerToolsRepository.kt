@@ -105,8 +105,8 @@ class DefaultServerToolsRepository(
     override suspend fun remediate(seriesId: Long, chapterId: Long, keepFileId: Long) =
         write { it.remediate(seriesId, chapterId, RemediateRequest(keepFileId)) }
 
-    override suspend fun kavitaScan(seriesId: Long, libraryId: Long?, chapters: List<KavitaScanChapter>): ToolResult<KavitaScanResultDto> =
-        ToolResult.Offline // STUB (fix round 1 red commit)
+    override suspend fun kavitaScan(seriesId: Long, libraryId: Long?, chapters: List<KavitaScanChapter>) =
+        write { it.kavitaScan(seriesId, KavitaScanRequest(libraryId, chapters)) }
 
     override suspend fun trash() = read { it.trash() }
 

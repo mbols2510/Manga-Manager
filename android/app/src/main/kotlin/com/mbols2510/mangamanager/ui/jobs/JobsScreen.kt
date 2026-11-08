@@ -36,7 +36,9 @@ import com.mbols2510.mangamanager.data.api.HealthDto
 import com.mbols2510.mangamanager.data.api.JobStatusDto
 import com.mbols2510.mangamanager.data.api.StatusDto
 import com.mbols2510.mangamanager.ui.common.Banner
+import com.mbols2510.mangamanager.ui.common.SERVER_TEXT_LINES
 import com.mbols2510.mangamanager.ui.common.UnreachableBanner
+import com.mbols2510.mangamanager.ui.common.boundedServerText
 import com.mbols2510.mangamanager.ui.common.formatTimestamp
 import com.mbols2510.mangamanager.ui.common.serverErrorText
 
@@ -146,9 +148,11 @@ private fun Section(@StringRes title: Int, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun Line(text: String, secondary: Boolean = false) {
+private fun Line(text: String, secondary: Boolean = false, maxLines: Int = Int.MAX_VALUE) {
     Text(
         text = text,
+        maxLines = maxLines,
+        overflow = TextOverflow.Ellipsis,
         style = if (secondary) MaterialTheme.typography.bodySmall else MaterialTheme.typography.bodyMedium,
         color = if (secondary) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
     )
@@ -167,7 +171,9 @@ private fun StatusCards(status: StatusDto) {
             Line(stringResource(if (scheduler.running) R.string.jobs_scheduler_running else R.string.jobs_scheduler_idle))
             Line(stringResource(R.string.jobs_next_run, time(scheduler.nextRun)))
             scheduler.intervalMinutes?.let { Line(pluralStringResource(R.plurals.jobs_interval, it, it), secondary = true) }
-            scheduler.lastResult?.takeIf { it.isNotBlank() }?.let { Line(stringResource(R.string.jobs_last_result, it), secondary = true) }
+            scheduler.lastResult?.takeIf { it.isNotBlank() }?.let {
+                Line(stringResource(R.string.jobs_last_result, boundedServerText(it)), secondary = true, maxLines = SERVER_TEXT_LINES)
+            }
         }
     }
     Section(R.string.jobs_section_last_run) {
@@ -183,7 +189,7 @@ private fun StatusCards(status: StatusDto) {
                 run.covers?.let { pluralStringResource(R.plurals.jobs_run_covers, it, it) },
             )
             if (counts.isNotEmpty()) Line(counts.joinToString(stringResource(R.string.list_separator)), secondary = true)
-            run.message?.takeIf { it.isNotBlank() }?.let { Line(it, secondary = true) }
+            run.message?.takeIf { it.isNotBlank() }?.let { Line(boundedServerText(it), secondary = true, maxLines = SERVER_TEXT_LINES) }
         }
     }
     Section(R.string.jobs_section_library) {
@@ -207,7 +213,7 @@ private fun StatusCards(status: StatusDto) {
 private fun HealthCards(health: HealthDto) {
     Section(R.string.jobs_section_health) {
         health.paused?.takeIf { it.isNotBlank() }?.let {
-            Text(stringResource(R.string.jobs_paused, it), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            Text(stringResource(R.string.jobs_paused, boundedServerText(it)), maxLines = SERVER_TEXT_LINES, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
         }
         if (health.checks.isEmpty()) Line(stringResource(R.string.jobs_no_checks))
         health.checks.forEach { CheckRow(it) }
@@ -237,7 +243,7 @@ private fun CheckRow(check: HealthCheckDto) {
             )
         }
         val facts = listOfNotNull(
-            check.detail.takeIf { it.isNotBlank() },
+            check.detail.takeIf { it.isNotBlank() }?.let(::boundedServerText),
             if (check.state == "unset") null else stringResource(R.string.jobs_check_ms, check.ms),
         )
         if (facts.isNotEmpty()) {
@@ -245,7 +251,7 @@ private fun CheckRow(check: HealthCheckDto) {
                 text = facts.joinToString(stringResource(R.string.list_separator)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 3,
+                maxLines = SERVER_TEXT_LINES,
                 overflow = TextOverflow.Ellipsis,
             )
         }
@@ -263,10 +269,10 @@ private fun JobRow(name: String, job: JobStatusDto) {
         job.nextRun?.let { Line(stringResource(R.string.jobs_next_run, time(it)), secondary = true) }
         job.lastError?.takeIf { it.isNotBlank() }?.let {
             Text(
-                text = stringResource(R.string.jobs_job_last_error, it),
+                text = stringResource(R.string.jobs_job_last_error, boundedServerText(it)),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
-                maxLines = 3,
+                maxLines = SERVER_TEXT_LINES,
                 overflow = TextOverflow.Ellipsis,
             )
         }
