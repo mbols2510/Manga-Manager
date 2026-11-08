@@ -176,7 +176,8 @@ class ServerToolsRepositoryTest {
                 DefaultServerToolsRepository({ fake }, auth, io = executor.asCoroutineDispatcher()).status()
             }
             assertEquals(ToolResult.Success(StatusDto()), result)
-            assertEquals("tools-io-test", thread)
+            // Coroutine debug mode (on under -ea) appends " @coroutine#N" to the thread name.
+            assertTrue("ran on $thread", thread.startsWith("tools-io-test"))
         } finally {
             executor.shutdownNow()
         }
