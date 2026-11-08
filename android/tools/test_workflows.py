@@ -29,6 +29,8 @@ RELEASE_ENV = "${{ " + TAG_EXPR + " }}"
 RELEASE_IF = "env.RELEASE == 'true'"
 DRY_IF = "env.RELEASE != 'true'"
 
+TAG_IF = TAG_EXPR
+NOT_TAG_IF = "!(" + TAG_EXPR + ")"
 B_CHECK_DRY = "tools/release_checks.sh build/release-out"
 B_CHECK_REL = 'tools/release_checks.sh build/release-out --expect-version "$EXPECT_VERSION"'
 UNSIGNED_ARTIFACT = "android-release-unsigned"
@@ -55,6 +57,111 @@ SIGNED_CHECK = ('python3 android/tools/apk_check.py --apk signed/app-release.apk
 SIGNED_CHECK_REL = SIGNED_CHECK + ' --expect-version "$EXPECT_VERSION"'
 SHA_RUN = "sha256sum app-release.apk > app-release.apk.sha256 && cat app-release.apk.sha256"
 INVARIANTS_RUN = "python3 -m unittest discover -s android/tools -p 'test_workflows.py' -v"
+
+# The sign job, pinned EXACTLY (review round 3): every key, every step, every with/if/run/env. Any change to the
+# sign job in android-release.yml must be made here too, deliberately. Security gates read the github context
+# (TAG_IF / NOT_TAG_IF), never env.RELEASE, which a step could rewrite through $GITHUB_ENV.
+SIGN_JOB_YAML = r"""
+name: Sign on a fresh runner (${{ startsWith(github.ref, 'refs/tags/android-v') && 'release' || 'rehearsal with a throwaway key' }})
+needs: build
+runs-on: ubuntu-latest
+timeout-minutes: 15
+permissions:
+  contents: read
+# Every security decision in this job reads the github context directly (TAG_EXPR below), never env.RELEASE:
+# a step could rewrite an env variable for later steps through $GITHUB_ENV, but not the github context.
+env:
+  # Exact build-tools directory for apksigner, zipalign, aapt2 and dexdump (never "the highest installed").
+  BUILD_TOOLS_VERSION: "37.0.0"
+steps:
+  # Only the scripts of the same commit; no Gradle, no Java/Gradle setup, no caches in this job.
+  - uses: actions/checkout@v7.0.1
+    with:
+      persist-credentials: false
+      sparse-checkout: android/tools
+
+  - uses: actions/download-artifact@v8.0.2
+    with:
+      name: android-release-unsigned
+      path: unsigned
+
+  - name: Verify the checksums of the downloaded build
+    working-directory: unsigned
+    run: sha256sum -c app-release-unsigned.apk.sha256 mapping.txt.sha256
+
+  - name: Runner and pinned build-tools
+    run: |
+      echo "runner: $RUNNER_NAME ($ImageOS $ImageVersion)"
+      echo "pinned build-tools: $BUILD_TOOLS_VERSION"
+      ls "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/apksigner" "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION/zipalign"
+
+  - name: Release tag must be android-vX.Y.Z
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
+    env:
+      TAG: ${{ github.ref_name }}
+    run: |
+      version="${TAG#android-v}"
+      if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "::error::tag must look like android-vX.Y.Z"
+        exit 1
+      fi
+      echo "EXPECT_VERSION=$version" >> "$GITHUB_ENV"
+
+  - name: Signing rehearsal with a throwaway key (dry run only; never uploaded)
+    if: "!(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v'))"
+    env:
+      ANDROID_KEYSTORE_PASSWORD: rehearsal-only-not-a-secret
+      ANDROID_KEY_PASSWORD: rehearsal-only-not-a-secret
+      ANDROID_KEY_ALIAS: rehearsal
+    run: |
+      umask 077
+      keytool -genkeypair -keystore "$RUNNER_TEMP/rehearsal.keystore" -storetype PKCS12 -alias rehearsal \
+        -keyalg RSA -keysize 2048 -validity 1 -dname "CN=Signing rehearsal, O=Not for release" \
+        -storepass:env ANDROID_KEYSTORE_PASSWORD -keypass:env ANDROID_KEY_PASSWORD
+      KEYSTORE_BASE64=$(base64 -w0 "$RUNNER_TEMP/rehearsal.keystore") \
+        android/tools/sign_apk.sh unsigned/app-release-unsigned.apk signed/app-release.apk
+      rm -f "$RUNNER_TEMP/rehearsal.keystore"
+
+  - name: Sign the release APK with apksigner (the only step with secrets)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
+    env:
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+    run: android/tools/sign_apk.sh unsigned/app-release-unsigned.apk signed/app-release.apk
+
+  - name: Remove the signing keystore
+    if: always()
+    run: rm -f "$RUNNER_TEMP/release.keystore" "$RUNNER_TEMP/rehearsal.keystore"
+
+  - name: APK checks on the signed APK (release)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
+    run: python3 android/tools/apk_check.py --apk signed/app-release.apk --mapping unsigned/mapping.txt --build-tools "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" --expect-signed --expect-version "$EXPECT_VERSION"
+
+  - name: APK checks on the rehearsal-signed APK (dry run)
+    if: "!(github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v'))"
+    run: python3 android/tools/apk_check.py --apk signed/app-release.apk --mapping unsigned/mapping.txt --build-tools "$ANDROID_HOME/build-tools/$BUILD_TOOLS_VERSION" --expect-signed
+
+  - name: SHA-256 of the signed APK
+    working-directory: signed
+    run: sha256sum app-release.apk > app-release.apk.sha256 && cat app-release.apk.sha256
+
+  - name: Upload the signed APK and its SHA-256 (release)
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/android-v')
+    uses: actions/upload-artifact@v7.0.2
+    with:
+      name: android-release
+      path: |
+        signed/app-release.apk
+        signed/app-release.apk.sha256
+      if-no-files-found: error
+      retention-days: 14
+"""
+EXPECTED_SIGN_JOB = yaml.safe_load(SIGN_JOB_YAML)
+SIGN_JOB_KEYS = {"name", "needs", "runs-on", "timeout-minutes", "permissions", "env", "steps"}
+SIGN_ACTIONS = {"actions/checkout@v7.0.1", "actions/download-artifact@v8.0.2", "actions/upload-artifact@v7.0.2"}
+STEP_KEYS = {"name", "uses", "with", "if", "run", "env", "working-directory"}
 
 BANNED_TRIGGERS = {"pull_request_target", "workflow_run", "issue_comment", "schedule", "repository_dispatch",
                    "workflow_call"}
@@ -281,12 +388,44 @@ def _build_problems(name, build):
     return p
 
 
+def sign_shape_problems(name, sign):
+    """The sign job's exact shape: allowed keys, runner, actions, step keys, checkout inputs, gates, and finally
+    full equality with EXPECTED_SIGN_JOB."""
+    p = []
+    extra = set(sign) - SIGN_JOB_KEYS
+    if extra:
+        p.append(f"{name}/sign: keys not allowed: {sorted(extra)} (no container, services, defaults, if, ...)")
+    if sign.get("runs-on") != "ubuntu-latest":
+        p.append(f"{name}/sign: runs-on must be exactly ubuntu-latest")
+    for s in sign.get("steps") or []:
+        if set(s) - STEP_KEYS:
+            p.append(f"{name}/sign/{s.get('name') or s.get('uses')}: step keys not allowed: {sorted(set(s) - STEP_KEYS)}")
+        if "uses" in s and s["uses"] not in SIGN_ACTIONS:
+            p.append(f"{name}/sign: action not allowed in the sign job: {s['uses']}")
+        if str(s.get("uses", "")).startswith("actions/checkout@") and \
+                s.get("with") != {"persist-credentials": False, "sparse-checkout": "android/tools"}:
+            p.append(f"{name}/sign: checkout with must be exactly persist-credentials false + sparse android/tools")
+        if "env." in str(s.get("if", "")):
+            p.append(f"{name}/sign/{s.get('name')}: if must not read env.* (rewritable through $GITHUB_ENV)")
+        if "GITHUB_ENV" in str(s.get("run", "")) and s.get("name") != "Release tag must be android-vX.Y.Z":
+            p.append(f"{name}/sign/{s.get('name')}: only the tag step may write $GITHUB_ENV")
+    if sign != EXPECTED_SIGN_JOB:
+        exp, got = EXPECTED_SIGN_JOB, sign
+        diff = sorted(k for k in set(exp) | set(got) if exp.get(k) != got.get(k))
+        if "steps" in diff:
+            es, gs = exp.get("steps") or [], got.get("steps") or []
+            bad = [i for i in range(max(len(es), len(gs))) if (es[i:i + 1] or [None]) != (gs[i:i + 1] or [None])]
+            diff.append(f"steps differ at {bad}")
+        p.append(f"{name}/sign: job differs from the pinned EXPECTED_SIGN_JOB: {diff}")
+    return p
+
+
 def _sign_problems(name, sign):
     p = []
     env = sign.get("env") or {}
-    if set(env) != {"RELEASE", "BUILD_TOOLS_VERSION"} or env.get("RELEASE") != RELEASE_ENV or \
-            not re.fullmatch(r"\d+\.\d+\.\d+", str(env.get("BUILD_TOOLS_VERSION", ""))):
-        p.append(f"{name}/sign: env must be exactly RELEASE and a pinned BUILD_TOOLS_VERSION X.Y.Z")
+    if set(env) != {"BUILD_TOOLS_VERSION"} or not re.fullmatch(r"\d+\.\d+\.\d+", str(env.get("BUILD_TOOLS_VERSION", ""))):
+        p.append(f"{name}/sign: env must be exactly a pinned BUILD_TOOLS_VERSION X.Y.Z (no RELEASE flag)")
+    p += sign_shape_problems(name, sign)
     steps = sign.get("steps") or []
     for s in steps:
         uses, run = str(s.get("uses", "")), str(s.get("run", ""))
@@ -310,8 +449,8 @@ def _sign_problems(name, sign):
     i_sign = idx(lambda s: s.get("name") == SIGN_STEP)
     i_rehearse = idx(lambda s: "sign_apk.sh" in str(s.get("run", "")) and s.get("name") != SIGN_STEP)
     i_remove = idx(lambda s: 'rm -f "$RUNNER_TEMP/release.keystore"' in str(s.get("run", "")))
-    i_chk_rel = idx(lambda s: str(s.get("run", "")).strip() == SIGNED_CHECK_REL and s.get("if") == RELEASE_IF)
-    i_chk_dry = idx(lambda s: str(s.get("run", "")).strip() == SIGNED_CHECK and s.get("if") == DRY_IF)
+    i_chk_rel = idx(lambda s: str(s.get("run", "")).strip() == SIGNED_CHECK_REL and s.get("if") == TAG_IF)
+    i_chk_dry = idx(lambda s: str(s.get("run", "")).strip() == SIGNED_CHECK and s.get("if") == NOT_TAG_IF)
     i_sha = idx(lambda s: str(s.get("run", "")).strip() == SHA_RUN and s.get("working-directory") == "signed"
                 and "if" not in s)
     uploads = [i for i, s in enumerate(steps) if str(s.get("uses", "")).startswith("actions/upload-artifact@")]
@@ -324,14 +463,14 @@ def _sign_problems(name, sign):
         p.append(f"{name}/sign: step {SIGN_STEP!r} missing")
     else:
         s = steps[i_sign]
-        if s.get("if") != RELEASE_IF:
-            p.append(f"{name}/sign/{SIGN_STEP}: if must be exactly {RELEASE_IF!r}, got {s.get('if')!r}")
+        if s.get("if") != TAG_IF:
+            p.append(f"{name}/sign/{SIGN_STEP}: if must be exactly {TAG_IF!r}, got {s.get('if')!r}")
         if s.get("env") != SIGN_ENV:
             p.append(f"{name}/sign/{SIGN_STEP}: env must be exactly the four signing secrets")
         if str(s.get("run", "")).strip() != SIGN_RUN:
             p.append(f"{name}/sign/{SIGN_STEP}: must only run {SIGN_RUN!r}")
-    if i_rehearse is None or steps[i_rehearse].get("if") != DRY_IF or secret_uses(steps[i_rehearse]):
-        p.append(f"{name}/sign: a secret-free signing rehearsal with if {DRY_IF!r} is required")
+    if i_rehearse is None or steps[i_rehearse].get("if") != NOT_TAG_IF or secret_uses(steps[i_rehearse]):
+        p.append(f"{name}/sign: a secret-free signing rehearsal with if {NOT_TAG_IF!r} is required")
     if i_remove is None or steps[i_remove].get("if") != "always()":
         p.append(f"{name}/sign: one keystore removal step with if exactly always()")
     if i_chk_rel is None or i_chk_dry is None:
@@ -348,7 +487,7 @@ def _sign_problems(name, sign):
     else:
         up = steps[uploads[0]]
         w = up.get("with") or {}
-        if up.get("if") != RELEASE_IF or w.get("name") != SIGNED_ARTIFACT or lines(w.get("path")) != SIGNED_PATHS \
+        if up.get("if") != TAG_IF or w.get("name") != SIGNED_ARTIFACT or lines(w.get("path")) != SIGNED_PATHS \
                 or w.get("if-no-files-found") != "error":
             p.append(f"{name}/sign: upload must be {SIGNED_ARTIFACT!r} with exactly {SIGNED_PATHS}, release only")
         if None not in (i_chk_rel, i_sha) and uploads[0] < max(i_chk_rel, i_sha):
@@ -359,6 +498,9 @@ def _sign_problems(name, sign):
 
 def _publish_problems(name, publish):
     p = []
+    for s in [publish] + list(publish.get("steps") or []):
+        if "env." in str(s.get("if", "")):
+            p.append(f"{name}/publish: if must not read env.*")
     steps = publish.get("steps") or []
     for s in steps:
         if str(s.get("uses", "")).startswith("actions/checkout@") or re.search(r"gradlew|\.sh\b", str(s.get("run", ""))):
@@ -408,6 +550,9 @@ def docker_problems(wf):
 class CurrentWorkflows(unittest.TestCase):
     def test_release_workflow(self):
         self.assertEqual(release_problems(load("android-release.yml")), [])
+
+    def test_sign_job_pinned_exactly(self):
+        self.assertEqual(load("android-release.yml")["jobs"]["sign"], EXPECTED_SIGN_JOB)
 
     def test_android_workflow(self):
         self.assertEqual(nonrelease_problems(load("android.yml"), "android.yml"), [])
@@ -491,7 +636,7 @@ RELEASE_MUTATIONS = {
     "publish checks out code": lambda wf: _job(wf, "publish")["steps"].insert(
         0, {"uses": "actions/checkout@v7.0.1", "with": {"persist-credentials": False}}),
     "signing step runs always": lambda wf: _step(wf, "sign", SIGN_STEP).update({"if": "always()"}),
-    "signing step widened": lambda wf: _step(wf, "sign", SIGN_STEP).update({"if": RELEASE_IF + " || true"}),
+    "signing step widened": lambda wf: _step(wf, "sign", SIGN_STEP).update({"if": TAG_IF + " || true"}),
     "signing step extra command": lambda wf: _step(wf, "sign", SIGN_STEP).update({"run": SIGN_RUN + "\nmake"}),
     "secret in gradle build env": lambda wf: _gradle(wf).update(
         {"env": {"ANDROID_KEY_PASSWORD": "${{ secrets.ANDROID_KEY_PASSWORD }}"}}),
@@ -579,6 +724,53 @@ RELEASE_MUTATIONS = {
     "publish runs a script": lambda wf: _job(wf, "publish")["steps"].insert(
         1, {"name": "x", "run": "android/tools/sign_apk.sh a b"}),
 }
+
+def _runner_step(wf):
+    return _step(wf, "sign", "Runner and pinned build-tools")
+
+
+def _insert_sign(wf, before_name, step):
+    steps = wf["jobs"]["sign"]["steps"]
+    steps.insert(_index(steps, lambda s: s.get("name") == before_name), step)
+
+
+RELEASE_MUTATIONS.update({
+    # Round 3 (review of round 2): the sign job's shape and its gates.
+    "RELEASE=true appended in the runner step": lambda wf: _runner_step(wf).update(
+        {"run": _runner_step(wf)["run"] + 'echo "RELEASE=true" >> "$GITHUB_ENV"\n'}),
+    "step writing RELEASE=true to GITHUB_ENV": lambda wf: _insert_sign(
+        wf, "Release tag must be android-vX.Y.Z", {"name": "flip", "run": 'echo "RELEASE=true" >> "$GITHUB_ENV"'}),
+    "secret step gated on env.RELEASE": lambda wf: _step(wf, "sign", SIGN_STEP).update({"if": RELEASE_IF}),
+    "signed upload gated on env.RELEASE": lambda wf: _upload(wf, "sign").update({"if": RELEASE_IF}),
+    "rehearsal gated on env.RELEASE": lambda wf: _step(
+        wf, "sign", lambda s: "keytool" in str(s.get("run", ""))).update({"if": DRY_IF}),
+    "RELEASE back in the sign job env": lambda wf: _job(wf, "sign")["env"].update({"RELEASE": RELEASE_ENV}),
+    "step runs bash unsigned/mapping.txt": lambda wf: _insert_sign(
+        wf, SIGN_STEP, {"name": "x", "run": "bash unsigned/mapping.txt"}),
+    "checkout repository evil/fork": lambda wf: _step(
+        wf, "sign", lambda s: str(s.get("uses", "")).startswith("actions/checkout@"))["with"].update(
+        {"repository": "evil/fork"}),
+    "checkout ref main": lambda wf: _step(
+        wf, "sign", lambda s: str(s.get("uses", "")).startswith("actions/checkout@"))["with"].update({"ref": "main"}),
+    "checkout token": lambda wf: _step(
+        wf, "sign", lambda s: str(s.get("uses", "")).startswith("actions/checkout@"))["with"].update(
+        {"token": "${{ github.token }}"}),
+    "container evil/image": lambda wf: _job(wf, "sign").update({"container": "evil/image"}),
+    "services": lambda wf: _job(wf, "sign").update({"services": {"x": {"image": "evil/image"}}}),
+    "runs-on self-hosted": lambda wf: _job(wf, "sign").update({"runs-on": "self-hosted"}),
+    "cp unsigned over signed before the SHA-256": lambda wf: _insert_sign(
+        wf, "SHA-256 of the signed APK",
+        {"name": "x", "run": "cp unsigned/app-release-unsigned.apk signed/app-release.apk"}),
+    "third-party action in the sign job": lambda wf: _insert_sign(
+        wf, SIGN_STEP, {"uses": "some/action@v1.0.0"}),
+    "shell override on a step": lambda wf: _step(wf, "sign", SIGN_STEP).update({"shell": "python {0}"}),
+    "defaults.run.shell on the sign job": lambda wf: _job(wf, "sign").update({"defaults": {"run": {"shell": "sh"}}}),
+    "timeout-minutes on the runner step": lambda wf: _runner_step(wf).update({"timeout-minutes": 1}),
+    "job-level if on sign": lambda wf: _job(wf, "sign").update({"if": "always()"}),
+    "verify step changed": lambda wf: _step(wf, "sign", _run_is(VERIFY_RUN)).update(
+        {"run": "sha256sum -c app-release-unsigned.apk.sha256"}),
+    "publish if reads env": lambda wf: _job(wf, "publish").update({"if": TAG_EXPR + " && env.X != ''"}),
+})
 
 SIGN_SCRIPT_MUTATIONS = {
     "keystore in workspace": lambda t: t.replace('ks="$RUNNER_TEMP/release.keystore"', 'ks="release.keystore"'),
