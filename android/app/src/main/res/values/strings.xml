@@ -143,6 +143,12 @@
         <item quantity="other">%d files moved to the trash.</item>
     </plurals>
     <string name="doubles_restored">File restored.</string>
+    <string name="doubles_rescan_kavita">Rescan in Kavita</string>
+    <string name="doubles_kavita_scanning">Asking Kavita to rescan the series…</string>
+    <string name="doubles_kavita_done">Kavita rescan requested.</string>
+    <string name="doubles_kavita_maybe_applied">No answer from the server in time. The Kavita rescan may have been applied.</string>
+    <string name="doubles_kavita_unreachable">Could not reach the server for the Kavita rescan. Kavita picks the change up on its next scan.</string>
+    <string name="doubles_kavita_failed">Kavita rescan failed: %1$s Kavita picks the change up on its next scan.</string>
     <string name="doubles_maybe_applied">No answer from the server in time. The change may have been applied; the list was reloaded to show the current state.</string>
 
     <!-- Jobs and health (Task 11) -->

@@ -67,6 +67,8 @@ object DoublesTestTags {
     const val SERIES_LIST = "doubles_series_list"
     const val TRASH_LIST = "doubles_trash_list"
     const val MESSAGE = "doubles_message"
+    const val KAVITA_NOTICE = "doubles_kavita_notice"
+    const val RESCAN = "doubles_rescan_kavita"
 }
 
 /**

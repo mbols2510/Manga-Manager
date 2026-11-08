@@ -4,6 +4,9 @@ import com.mbols2510.mangamanager.data.api.DoubleSeriesDto
 import com.mbols2510.mangamanager.data.api.DoubleSeriesSummaryDto
 import com.mbols2510.mangamanager.data.api.ErrorDto
 import com.mbols2510.mangamanager.data.api.HealthDto
+import com.mbols2510.mangamanager.data.api.KavitaScanChapter
+import com.mbols2510.mangamanager.data.api.KavitaScanRequest
+import com.mbols2510.mangamanager.data.api.KavitaScanResultDto
 import com.mbols2510.mangamanager.data.api.MangaApi
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
 import com.mbols2510.mangamanager.data.api.NotPairedException
@@ -61,6 +64,17 @@ interface ServerToolsRepository {
     /** DESTRUCTIVE: every file of the chapter except [keepFileId] is moved to the server's trash. */
     suspend fun remediate(seriesId: Long, chapterId: Long, keepFileId: Long): ToolResult<RemediateResultDto>
 
+    /**
+     * Asks the server to rescan the series in Kavita and to re-mark remediated chapters as read once Kavita reports
+     * the kept file's page count ([KavitaScanChapter.expectedPages]). The server waits for Kavita synchronously (up
+     * to ~15 s per chapter), so a timeout is [ToolResult.MaybeApplied]. Never retried automatically.
+     */
+    suspend fun kavitaScan(
+        seriesId: Long,
+        libraryId: Long?,
+        chapters: List<KavitaScanChapter>,
+    ): ToolResult<KavitaScanResultDto>
+
     suspend fun trash(): ToolResult<List<TrashEntryDto>>
 
     /** Moves a trashed file back to where it was. */
@@ -90,6 +104,9 @@ class DefaultServerToolsRepository(
 
     override suspend fun remediate(seriesId: Long, chapterId: Long, keepFileId: Long) =
         write { it.remediate(seriesId, chapterId, RemediateRequest(keepFileId)) }
+
+    override suspend fun kavitaScan(seriesId: Long, libraryId: Long?, chapters: List<KavitaScanChapter>): ToolResult<KavitaScanResultDto> =
+        ToolResult.Offline // STUB (fix round 1 red commit)
 
     override suspend fun trash() = read { it.trash() }
 

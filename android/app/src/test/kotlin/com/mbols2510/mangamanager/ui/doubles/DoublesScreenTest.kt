@@ -69,8 +69,9 @@ class DoublesScreenTest {
 
         rule.onNodeWithText(keep).performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithTag(DoublesTestTags.CONFIRM_DIALOG).fetchSemanticsNodes().isNotEmpty() }
-        inDialog(rule.activity.getString(R.string.doubles_confirm_remediate_keep, "kept-official.cbz")).assertIsDisplayed()
-        inDialog("other-copy.cbz").assertIsDisplayed()
+        // Fix round 1 (ruling 24, 2a): files are shown with their parent folder ("S/<name>").
+        inDialog(rule.activity.getString(R.string.doubles_confirm_remediate_keep, "S/kept-official.cbz")).assertIsDisplayed()
+        inDialog("S/other-copy.cbz").assertIsDisplayed()
         rule.onNodeWithTag(DoublesTestTags.CONFIRM).assertIsDisplayed()
         rule.onNodeWithText(string(R.string.doubles_confirm_remediate_action)).assertIsDisplayed()
         assertEquals("the dialog alone sends nothing", 0, api.count("remediate"))
@@ -95,7 +96,7 @@ class DoublesScreenTest {
         waitForText(string(R.string.doubles_empty_title))
 
         rule.onNodeWithText(string(R.string.doubles_tab_trash)).performClick()
-        waitForText("restore-me.cbz")
+        waitForText("S/restore-me.cbz")
         rule.onNodeWithText(string(R.string.doubles_restore)).performClick()
         rule.waitUntil(5_000) { rule.onAllNodesWithTag(DoublesTestTags.CONFIRM_DIALOG).fetchSemanticsNodes().isNotEmpty() }
         assertEquals(0, api.count("restore"))
@@ -105,5 +106,52 @@ class DoublesScreenTest {
         waitForText(string(R.string.doubles_trash_empty_title))
         assertEquals(1, api.count("restore"))
         rule.onNodeWithText(string(R.string.doubles_restored)).assertIsDisplayed()
+    }
+
+    @Test
+    fun confirm_dialog_and_file_rows_show_the_parent_folder() {
+        val sameName = series(
+            1, "Berserk",
+            chapter(10, file(100, "Official/Ch 12.cbz", official = true), file(101, "Scanlation/Ch 12.cbz")),
+        )
+        api.seriesList = { summaries(sameName) }
+        api.detail = { sameName }
+        show()
+        waitForText("Berserk")
+        rule.onNodeWithText("Berserk").performClick()
+        waitForText("Official/Ch 12.cbz")
+        rule.onNodeWithText("Official/Ch 12.cbz").assertIsDisplayed()
+        rule.onNodeWithText("Scanlation/Ch 12.cbz").assertIsDisplayed()
+
+        rule.onNodeWithText(string(R.string.doubles_keep_selected)).performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithTag(DoublesTestTags.CONFIRM_DIALOG).fetchSemanticsNodes().isNotEmpty() }
+        inDialog(rule.activity.getString(R.string.doubles_confirm_remediate_keep, "Official/Ch 12.cbz")).assertIsDisplayed()
+        inDialog("Scanlation/Ch 12.cbz").assertIsDisplayed()
+        rule.onNodeWithTag(DoublesTestTags.CANCEL).performClick()
+        assertEquals(0, api.count("remediate"))
+    }
+
+    @Test
+    fun rescan_button_sends_the_pending_chapters() {
+        api.seriesList = { summaries(full) }
+        api.detail = { full }
+        show()
+        waitForText("Berserk")
+        rule.onNodeWithText("Berserk").performClick()
+        val keep = string(R.string.doubles_keep_selected)
+        waitForText(keep)
+        rule.onAllNodesWithTag(DoublesTestTags.RESCAN).assertCountEquals(0) // nothing pending yet
+
+        rule.onNodeWithText(keep).performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithTag(DoublesTestTags.CONFIRM).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNodeWithTag(DoublesTestTags.CONFIRM).performClick()
+        rule.waitUntil(5_000) { rule.onAllNodesWithTag(DoublesTestTags.RESCAN).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals("nothing is sent before the button", 0, api.calls.count { it.startsWith("kavita") })
+
+        rule.onNodeWithTag(DoublesTestTags.RESCAN).performClick()
+        rule.waitUntil(5_000) { api.calls.any { it.startsWith("kavita") } }
+        assertEquals(listOf("kavita:1:lib=1:[10=24]"), api.calls.filter { it.startsWith("kavita") })
+        waitForText(string(R.string.doubles_kavita_done))
+        rule.waitUntil(5_000) { rule.onAllNodesWithTag(DoublesTestTags.RESCAN).fetchSemanticsNodes().isEmpty() }
     }
 }

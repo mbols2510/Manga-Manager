@@ -6,6 +6,7 @@ import com.mbols2510.mangamanager.data.api.DoubleChapterDto
 import com.mbols2510.mangamanager.data.api.DoubleFileDto
 import com.mbols2510.mangamanager.data.api.DoubleSeriesDto
 import com.mbols2510.mangamanager.data.api.DoubleSeriesSummaryDto
+import com.mbols2510.mangamanager.data.api.KavitaScanChapter
 import com.mbols2510.mangamanager.data.api.TrashEntryDto
 import com.mbols2510.mangamanager.data.repo.ServerToolsRepository
 import com.mbols2510.mangamanager.data.repo.ToolResult
@@ -36,11 +37,30 @@ sealed interface DoublesMessage {
     data class Remediated(val moved: Int) : DoublesMessage
     data object Restored : DoublesMessage
 
-    /** The call was sent but no answer came back; the screen re-read the server state. */
+    /** The call was sent but no clean answer came back (timeout, 5xx); the screen re-read the server state. */
     data object MaybeApplied : DoublesMessage
 
-    /** A clean error answer: nothing was changed. */
+    /** A clean 4xx answer: nothing was changed. */
     data class ServerError(val code: Int, val text: String?) : DoublesMessage
+}
+
+/**
+ * Remediated chapters of one series that Kavita has not been told about yet (`expectedPages` = the kept file's pages).
+ * Kept until a scan answers with a clean 2xx.
+ */
+data class PendingScan(val libraryId: Long?, val chapters: List<KavitaScanChapter>)
+
+/** State of the Kavita rescan of [seriesId]. Failures are warnings: nothing else is blocked by them. */
+sealed interface KavitaNotice {
+    val seriesId: Long
+
+    data class Scanning(override val seriesId: Long) : KavitaNotice
+    data class Done(override val seriesId: Long) : KavitaNotice
+
+    /** No answer in time: the server may still be applying it. Retry is offered, never automatic. */
+    data class MaybeApplied(override val seriesId: Long) : KavitaNotice
+    data class Unreachable(override val seriesId: Long) : KavitaNotice
+    data class Failed(override val seriesId: Long, val code: Int, val text: String?) : KavitaNotice
 }
 
 data class DoublesUiState(
@@ -60,6 +80,11 @@ data class DoublesUiState(
     val busy: Boolean = false,
     val unreachable: Boolean = false,
     val message: DoublesMessage? = null,
+    /** Per series id: remediated chapters still to be sent to Kavita. */
+    val pendingScans: Map<Long, PendingScan> = emptyMap(),
+    /** Series whose Kavita rescan call is in flight. */
+    val scanning: Set<Long> = emptySet(),
+    val kavita: KavitaNotice? = null,
 )
 
 /**
@@ -139,6 +164,10 @@ class DoublesViewModel(private val repository: ServerToolsRepository) : ViewMode
     fun dismissConfirm() {
         mutableState.update { it.copy(confirm = null) }
     }
+
+    // STUB (fix round 1 red commit)
+    fun dismissKavitaNotice() = Unit
+    fun rescanKavita(seriesId: Long? = null) = Unit
 
     fun dismissMessage() {
         mutableState.update { it.copy(message = null) }
@@ -270,9 +299,15 @@ class DoublesViewModel(private val repository: ServerToolsRepository) : ViewMode
     }
 }
 
+/** STUB (fix round 1 red commit). */
+internal fun stillMatches(p: PendingConfirm.ConfirmRemediate, detail: DoubleSeriesDto?): Boolean = true
+
 /** The web dashboard's default: the official release, else the newest file, else the first one. */
 fun defaultKeep(chapter: DoubleChapterDto): DoubleFileDto? =
     chapter.files.firstOrNull { it.isOfficial } ?: chapter.files.firstOrNull { it.isNewest } ?: chapter.files.firstOrNull()
 
 /** The file name of a server path (the part after the last slash or backslash). */
 fun fileName(path: String?): String = path.orEmpty().substringAfterLast('/').substringAfterLast('\\')
+
+/** STUB (fix round 1 red commit). */
+fun folderAndName(path: String?): String = fileName(path)

@@ -119,6 +119,7 @@ class ServerToolsRepositoryTest {
             { r.status() },
             { r.health() },
             { r.runNow() },
+            { r.kavitaScan(1, 1, emptyList()) },
         )
         calls.forEachIndexed { i, call ->
             auth.clear()
@@ -181,5 +182,36 @@ class ServerToolsRepositoryTest {
         } finally {
             executor.shutdownNow()
         }
+    }
+
+    @Test
+    fun kavita_scan_posts_library_id_chapters_and_kept_pages_and_a_timeout_is_maybe_applied() = runBlocking {
+        server.enqueue(json(200, fixture("kavita_scan_result.json")))
+        val result = repo().kavitaScan(
+            12,
+            1,
+            listOf(
+                com.mbols2510.mangamanager.data.api.KavitaScanChapter(501, 24),
+                com.mbols2510.mangamanager.data.api.KavitaScanChapter(502, 20),
+            ),
+        )
+        assertEquals(ToolResult.Success(com.mbols2510.mangamanager.data.api.KavitaScanResultDto(scanned = true)), result)
+        val sent = server.takeRequest()
+        assertEquals("POST", sent.method)
+        assertEquals("/api/double-chapters/series/12/kavita-scan", sent.path)
+        assertEquals(
+            """{"libraryId":1,"chapters":[{"chapterId":501,"expectedPages":24},{"chapterId":502,"expectedPages":20}]}""",
+            sent.body.readUtf8(),
+        )
+
+        // The server waits for Kavita (reconcile_read_status): no answer in time means it may have been applied.
+        server.enqueue(json(200, fixture("kavita_scan_result.json")).setHeadersDelay(1500, TimeUnit.MILLISECONDS))
+        val slow = repo(api(readTimeoutMs = 200))
+        assertEquals(
+            ToolResult.MaybeApplied,
+            slow.kavitaScan(12, null, listOf(com.mbols2510.mangamanager.data.api.KavitaScanChapter(501, 24))),
+        )
+        server.enqueue(json(502, """{"error": "Kavita unreachable"}"""))
+        assertEquals(ToolResult.ServerError(502, "Kavita unreachable"), repo().kavitaScan(12, 1, emptyList()))
     }
 }

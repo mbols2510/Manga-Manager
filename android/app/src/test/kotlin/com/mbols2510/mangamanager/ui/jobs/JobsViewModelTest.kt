@@ -251,4 +251,13 @@ class JobsViewModelTest {
         advanceUntilIdle()
         assertEquals(RunMessage.Started, vm.state.value.runMessage)
     }
+
+    @Test
+    fun long_server_text_is_capped() {
+        val long = "x".repeat(5_000)
+        val capped = com.mbols2510.mangamanager.ui.common.boundedServerText(long)
+        assertEquals(com.mbols2510.mangamanager.ui.common.MAX_SERVER_TEXT_CHARS, capped.length)
+        assertTrue(capped.endsWith("…"))
+        assertEquals("short", com.mbols2510.mangamanager.ui.common.boundedServerText("  short \n"))
+    }
 }

@@ -1,5 +1,8 @@
 package com.mbols2510.mangamanager.ui.doubles
 
+import com.mbols2510.mangamanager.data.api.DoubleChapterDto
+import com.mbols2510.mangamanager.data.api.KavitaScanChapter
+import com.mbols2510.mangamanager.data.api.KavitaScanRequest
 import com.mbols2510.mangamanager.data.api.RemediateResultDto
 import com.mbols2510.mangamanager.data.repo.AuthState
 import com.mbols2510.mangamanager.data.repo.DefaultServerToolsRepository
@@ -20,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -118,7 +122,9 @@ class DoublesViewModelTest {
         assertEquals(before.series, after.series)
         assertEquals(before.trash, after.trash)
         assertEquals(DoublesMessage.ServerError(400, "keepFileId does not match any file on this chapter"), after.message)
-        assertEquals("a clean error is not followed by a re-read", listOf("remediate:1:10:100"), api.calls)
+        // Fix round 1 (ruling 24, 2c): a clean 400/404 re-reads the series detail (the chapter is probably gone). The
+        // server's detail is unchanged here, so the screen still shows exactly what it showed before.
+        assertEquals("a clean 4xx re-reads only the detail", listOf("remediate:1:10:100", "detail:1"), api.calls)
         assertFalse(after.busy)
         assertFalse(auth.needsRepair.value)
     }
@@ -332,5 +338,278 @@ class DoublesViewModelTest {
         advanceUntilIdle()
         assertFalse(vm.state.value.unreachable)
         assertEquals(listOf(1L), vm.state.value.series.map { it.id })
+    }
+
+    // ------------------------------------------------------------------ fix round 1: Kavita rescan
+
+    /** A server whose series 1 loses each remediated chapter; 404 once none is left. */
+    private fun liveSeries(vararg chapters: DoubleChapterDto): MutableList<DoubleChapterDto> {
+        val remaining = chapters.toMutableList()
+        api.detail = { id ->
+            if (id == 1L && remaining.isNotEmpty()) series(1, "Berserk", *remaining.toTypedArray()) else throw httpError(404)
+        }
+        api.seriesList = { if (remaining.isEmpty()) emptyList() else summaries(series(1, "Berserk", *remaining.toTypedArray())) }
+        api.remediateHandler = { _, chapterId, _ ->
+            remaining.removeAll { it.id == chapterId }
+            successResponse(200, RemediateResultDto(listOf(trashEntry("t$chapterId")), 1))
+        }
+        return remaining
+    }
+
+    private val ch10 = chapter(10, file(100, "a.cbz", pages = 24, official = true), file(101, "b.cbz", pages = 22))
+    private val ch11 = chapter(11, file(110, "c.cbz", pages = 20), file(111, "d.cbz", pages = 19))
+    private val ch12 = chapter(12, file(120, "e.cbz", pages = 30), file(121, "f.cbz", pages = 31))
+
+    private fun DoublesViewModel.keep(chapterId: Long, fileId: Long) {
+        remediate(1, chapterId, fileId)
+        confirm()
+    }
+
+    private fun kavitaCalls() = api.calls.filter { it.startsWith("kavita") }
+
+    @Test
+    fun kavita_scan_sent_once_when_leaving_the_series_with_all_remediated_chapters() = runTest(dispatcher) {
+        liveSeries(ch10, ch11, ch12)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        vm.keep(11, 111)
+        advanceUntilIdle()
+        assertEquals("nothing is sent while the user stays in the series", emptyList<String>(), kavitaCalls())
+
+        vm.closeSeries()
+        advanceUntilIdle()
+        assertEquals(listOf("kavita:1:lib=1:[10=24,11=19]"), kavitaCalls())
+        assertTrue(vm.state.value.pendingScans.isEmpty())
+        assertEquals(KavitaNotice.Done(1), vm.state.value.kavita)
+
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.closeSeries()
+        advanceUntilIdle()
+        assertEquals("nothing pending: no second scan", 1, kavitaCalls().size)
+    }
+
+    @Test
+    fun kavita_scan_also_sent_when_no_duplicates_are_left() = runTest(dispatcher) {
+        liveSeries(ch10)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(10, 101)
+        advanceUntilIdle()
+        assertNull("the series is gone (404): back to the list", vm.state.value.openSeriesId)
+        assertEquals(listOf("kavita:1:lib=1:[10=22]"), kavitaCalls())
+    }
+
+    @Test
+    fun kavita_scan_body_carries_library_id_chapter_ids_and_kept_pages() = runTest(dispatcher) {
+        liveSeries(ch10, ch11, ch12)
+        api.detail = { id -> if (id == 1L) series(1, "Berserk", ch10, ch11, ch12).copy(libraryId = 7) else throw httpError(404) }
+        api.remediateHandler = { _, _, _ -> successResponse(200, RemediateResultDto(emptyList(), null)) }
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(12, 121)
+        advanceUntilIdle()
+        vm.closeSeries()
+        advanceUntilIdle()
+        assertEquals(
+            listOf(1L to KavitaScanRequest(libraryId = 7, chapters = listOf(KavitaScanChapter(12, 31)))),
+            api.kavitaRequests,
+        )
+    }
+
+    @Test
+    fun kavita_scan_pending_list_survives_a_failed_scan_and_is_cleared_on_2xx() = runTest(dispatcher) {
+        liveSeries(ch10, ch11)
+        api.kavitaHandler = { _, _ -> errorResponse(502, """{"error":"Kavita answered 500"}""") }
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        vm.closeSeries()
+        advanceUntilIdle()
+        assertEquals(KavitaNotice.Failed(1, 502, "Kavita answered 500"), vm.state.value.kavita)
+        assertEquals(listOf(KavitaScanChapter(10, 24)), vm.state.value.pendingScans.getValue(1).chapters)
+        assertEquals("no automatic retry", 1, kavitaCalls().size)
+        assertFalse("a failed scan blocks nothing", vm.state.value.busy)
+
+        api.kavitaHandler = { _, _ -> successResponse(200, com.mbols2510.mangamanager.data.api.KavitaScanResultDto(true)) }
+        vm.rescanKavita(1)
+        advanceUntilIdle()
+        assertEquals(listOf("kavita:1:lib=1:[10=24]", "kavita:1:lib=1:[10=24]"), kavitaCalls())
+        assertTrue(vm.state.value.pendingScans.isEmpty())
+        vm.rescanKavita(1)
+        advanceUntilIdle()
+        assertEquals(2, kavitaCalls().size)
+    }
+
+    @Test
+    fun kavita_scan_timeout_is_reported_as_maybe_applied_with_retry() = runTest(dispatcher) {
+        liveSeries(ch10, ch11)
+        api.kavitaHandler = { _, _ -> throw SocketTimeoutException("timeout") }
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        vm.closeSeries()
+        advanceUntilIdle()
+        assertEquals(KavitaNotice.MaybeApplied(1), vm.state.value.kavita)
+        assertTrue("kept for the retry", vm.state.value.pendingScans.containsKey(1))
+        assertEquals(1, kavitaCalls().size)
+
+        api.kavitaHandler = { _, _ -> successResponse(200, com.mbols2510.mangamanager.data.api.KavitaScanResultDto(true)) }
+        vm.rescanKavita(1) // the banner's Retry
+        advanceUntilIdle()
+        assertEquals(2, kavitaCalls().size)
+        assertEquals(KavitaNotice.Done(1), vm.state.value.kavita)
+    }
+
+    @Test
+    fun kavita_scan_not_sent_when_nothing_was_remediated() = runTest(dispatcher) {
+        liveSeries(ch10, ch11)
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.closeSeries()
+        advanceUntilIdle()
+
+        // A clean 4xx and a not-sent call change nothing, so nothing is pending either.
+        vm.openSeries(1)
+        advanceUntilIdle()
+        api.remediateHandler = { _, _, _ -> errorResponse(400) }
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        api.remediateHandler = { _, _, _ -> throw java.net.ConnectException("refused") }
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        vm.rescanKavita()
+        vm.closeSeries()
+        advanceUntilIdle()
+        assertEquals(emptyList<String>(), kavitaCalls())
+        assertTrue(vm.state.value.pendingScans.isEmpty())
+        assertNull(vm.state.value.kavita)
+    }
+
+    @Test
+    fun closing_the_series_does_not_cancel_the_scan() = runTest(dispatcher) {
+        liveSeries(ch10, ch11)
+        api.kavitaGate = CompletableDeferred()
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        vm.rescanKavita() // the button, while the series is open
+        runCurrent()
+        assertEquals(setOf(1L), vm.state.value.scanning)
+        assertFalse("the scan never blocks the screen", vm.state.value.busy)
+
+        vm.closeSeries() // leaving starts no second scan while one is in flight
+        vm.openSeries(2)
+        advanceUntilIdle()
+        assertEquals(1, kavitaCalls().size)
+
+        api.kavitaGate!!.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(KavitaNotice.Done(1), vm.state.value.kavita)
+        assertTrue(vm.state.value.pendingScans.isEmpty())
+        assertTrue(vm.state.value.scanning.isEmpty())
+        assertEquals(1, kavitaCalls().size)
+    }
+
+    @Test
+    fun kavita_scan_401_sets_auth_state() = runTest(dispatcher) {
+        liveSeries(ch10, ch11)
+        api.kavitaHandler = { _, _ -> errorResponse(401) }
+        val vm = vm()
+        advanceUntilIdle()
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        vm.closeSeries()
+        advanceUntilIdle()
+        assertTrue(auth.needsRepair.value)
+        assertNull(vm.state.value.kavita)
+        assertTrue(vm.state.value.scanning.isEmpty())
+        assertTrue("still pending after the re-pair", vm.state.value.pendingScans.containsKey(1))
+    }
+
+    // ------------------------------------------------------------------ fix round 1: hardening
+
+    @Test
+    fun stale_confirm_cannot_be_confirmed_after_the_detail_changed() = runTest(dispatcher) {
+        val vm = openFirst()
+        vm.remediate(1, 10, 100)
+        assertTrue(vm.state.value.confirm is PendingConfirm.ConfirmRemediate)
+
+        // The detail is re-read and chapter 10 is gone: the staged confirmation is dropped.
+        api.detail = { afterFirst }
+        vm.refresh()
+        advanceUntilIdle()
+        assertNull(vm.state.value.confirm)
+        vm.confirm()
+        advanceUntilIdle()
+        assertEquals(0, api.count("remediate"))
+
+        // Staged, then the files of the chapter change behind it: confirm() refuses the stale dialog.
+        val changed = series(1, "Berserk", chapter(11, file(110, "c.cbz"), file(112, "new.cbz")))
+        vm.remediate(1, 11, 110)
+        val staged = vm.state.value.confirm as PendingConfirm.ConfirmRemediate
+        assertFalse(stillMatches(staged, changed))
+        assertTrue(stillMatches(staged, afterFirst))
+
+        // Opening or closing a series clears it too.
+        vm.closeSeries()
+        assertNull(vm.state.value.confirm)
+        vm.openSeries(1)
+        advanceUntilIdle()
+        vm.remediate(1, 11, 110)
+        vm.openSeries(1)
+        assertNull(vm.state.value.confirm)
+        advanceUntilIdle()
+        assertEquals(0, api.count("remediate"))
+    }
+
+    @Test
+    fun remediate_404_refetches_detail_and_5xx_is_an_unknown_outcome() = runTest(dispatcher) {
+        val vm = openFirst()
+        api.remediateHandler = { _, _, _ -> errorResponse(404, """{"error":"Chapter not found in current scan results"}""") }
+        api.detail = { afterFirst }
+        vm.keep(10, 100)
+        advanceUntilIdle()
+        assertEquals(DoublesMessage.ServerError(404, "Chapter not found in current scan results"), vm.state.value.message)
+        assertEquals(listOf(11L), vm.state.value.detail!!.chapters.map { it.id })
+        assertTrue("a clean 4xx records nothing for Kavita", vm.state.value.pendingScans.isEmpty())
+
+        api.calls.clear()
+        api.remediateHandler = { _, _, _ -> errorResponse(500, """{"error":"boom"}""") }
+        vm.keep(11, 110)
+        advanceUntilIdle()
+        assertEquals(DoublesMessage.MaybeApplied, vm.state.value.message)
+        assertEquals(listOf("remediate:1:11:110", "detail:1", "series", "trash"), api.calls)
+        assertEquals(listOf(KavitaScanChapter(11, 20)), vm.state.value.pendingScans.getValue(1).chapters)
+    }
+
+    @Test
+    fun folder_and_name_tells_same_named_files_apart() {
+        assertEquals("Official/Ch. 12.cbz", folderAndName("/manga/Berserk/Official/Ch. 12.cbz"))
+        assertEquals("Scanlation/Ch. 12.cbz", folderAndName("/manga/Berserk/Scanlation/Ch. 12.cbz"))
+        assertEquals("a.cbz", folderAndName("a.cbz"))
+        assertEquals("dir/b.cbz", folderAndName("C:\\lib\\dir\\b.cbz"))
+        assertEquals("", folderAndName(null))
     }
 }

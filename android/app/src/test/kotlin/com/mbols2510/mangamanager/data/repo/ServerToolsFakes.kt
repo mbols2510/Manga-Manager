@@ -5,6 +5,8 @@ import com.mbols2510.mangamanager.data.api.DoubleFileDto
 import com.mbols2510.mangamanager.data.api.DoubleSeriesDto
 import com.mbols2510.mangamanager.data.api.DoubleSeriesSummaryDto
 import com.mbols2510.mangamanager.data.api.HealthDto
+import com.mbols2510.mangamanager.data.api.KavitaScanRequest
+import com.mbols2510.mangamanager.data.api.KavitaScanResultDto
 import com.mbols2510.mangamanager.data.api.MangaApi
 import com.mbols2510.mangamanager.data.api.MangaApiFactory
 import com.mbols2510.mangamanager.data.api.RemediateRequest
@@ -90,6 +92,11 @@ class ToolsApi : MangaApi by PagedApi(0) {
     var healthHandler: () -> HealthDto = { HealthDto() }
     var runHandler: () -> Response<RunDto> = { successResponse(202, RunDto(true, "Run started")) }
     var gate: CompletableDeferred<Unit>? = null
+    var kavitaHandler: (Long, KavitaScanRequest) -> Response<KavitaScanResultDto> = { _, _ ->
+        successResponse(200, KavitaScanResultDto(scanned = true))
+    }
+    var kavitaGate: CompletableDeferred<Unit>? = null
+    val kavitaRequests = mutableListOf<Pair<Long, KavitaScanRequest>>()
 
     val calls = mutableListOf<String>()
     fun count(prefix: String) = calls.count { it.startsWith(prefix) }
@@ -108,6 +115,13 @@ class ToolsApi : MangaApi by PagedApi(0) {
         calls += "remediate:$seriesId:$chapterId:${body.keepFileId}"
         gate?.await()
         return remediateHandler(seriesId, chapterId, body.keepFileId)
+    }
+
+    override suspend fun kavitaScan(seriesId: Long, body: KavitaScanRequest): Response<KavitaScanResultDto> {
+        calls += "kavita:$seriesId:lib=${body.libraryId}:" + body.chapters.joinToString(",", "[", "]") { "${it.chapterId}=${it.expectedPages}" }
+        kavitaRequests += seriesId to body
+        kavitaGate?.await()
+        return kavitaHandler(seriesId, body)
     }
 
     override suspend fun trash(): List<TrashEntryDto> {
