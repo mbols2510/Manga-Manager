@@ -110,8 +110,12 @@ table. That measurement has not been run yet.
 JVM unit tests (Robolectric, Android 14 sandbox) and CI builds. Not verified on a device: the Keystore token
 store, notifications (including the lock-screen public versions and the permission prompt), Doze and reboot
 behaviour, and battery use (the measurement above has not been run). The signed `android-v*` release path has
-never run: no signing secrets are configured and nothing has been published. CI_STATE_PLACEHOLDER The QR code
-and the clipboard button on the dashboard's Devices card have not been tried in a browser.
+never run: no signing secrets are configured and nothing has been published. As of 2026-11-08 the newest
+signing-job gates (tag checks on the `github` context) have been checked only by the workflow-lint invariants;
+no release dry run has passed with them yet, and the Android unit tests for the latest app changes (notification
+prompt and Updates banner, cache cap, pairing write order) have not run on CI yet: those runs stopped before the
+build because GitHub's runners could not download the Gradle distribution (HTTP 503/504). The QR code and the
+clipboard button on the dashboard's Devices card have not been tried in a browser.
 
 ### Install
 
