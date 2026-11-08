@@ -466,48 +466,21 @@ private fun QuietTimeDialog(title: String, initial: LocalTime, onConfirm: (Local
 @Composable
 private fun NotificationsSection(ui: NotificationUi?, onButton: () -> Unit) {
     SectionTitle(stringResource(R.string.settings_notifications_title))
-    when (ui) {
-        null -> Unit
-        NotificationUi.On -> Text(
+    if (ui == NotificationUi.On) {
+        Text(
             text = stringResource(R.string.settings_notifications_on),
             style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier.testTag(SettingsTestTags.NOTIFICATIONS_ON),
         )
-        is NotificationUi.PermissionNeeded -> NotificationBanner(
-            text = stringResource(R.string.settings_notifications_denied),
-            button = stringResource(if (ui.canRequest) R.string.settings_notifications_allow else R.string.settings_notifications_open_settings),
+    } else {
+        // The same banner as on the Updates screen, without Dismiss: Settings is where notifications are managed.
+        NotificationStateBanner(
+            ui = ui,
             onButton = onButton,
-            tag = SettingsTestTags.NOTIFICATION_BANNER,
+            bannerTag = SettingsTestTags.NOTIFICATION_BANNER,
+            channelTag = SettingsTestTags.CHANNEL_BLOCKED,
+            buttonTag = SettingsTestTags.NOTIFICATION_BUTTON,
         )
-        NotificationUi.TurnedOff -> NotificationBanner(
-            text = stringResource(R.string.settings_notifications_off),
-            button = stringResource(R.string.settings_notifications_open_settings),
-            onButton = onButton,
-            tag = SettingsTestTags.NOTIFICATION_BANNER,
-        )
-        NotificationUi.ChannelBlocked -> NotificationBanner(
-            text = stringResource(R.string.settings_notifications_channel_blocked),
-            button = stringResource(R.string.settings_notifications_open_settings),
-            onButton = onButton,
-            tag = SettingsTestTags.CHANNEL_BLOCKED,
-        )
-    }
-}
-
-@Composable
-private fun NotificationBanner(text: String, button: String, onButton: () -> Unit, tag: String) {
-    Surface(
-        color = MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-        shape = MaterialTheme.shapes.medium,
-        modifier = Modifier
-            .fillMaxWidth()
-            .testTag(tag),
-    ) {
-        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(text, style = MaterialTheme.typography.bodyMedium)
-            Button(onClick = onButton, modifier = Modifier.testTag(SettingsTestTags.NOTIFICATION_BUTTON)) { Text(button) }
-        }
     }
 }
 
@@ -553,7 +526,8 @@ private fun UnpairDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
 }
 
 /** The app's own notification settings (an explicit system screen; no component of ours is exported). */
-private fun openNotificationSettings(context: Context) {
+/** The app's notification settings (fallback: the app details screen). Also used by the Updates banner. */
+internal fun openNotificationSettings(context: Context) {
     val intent = Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, context.packageName)
     try {
         context.startActivity(intent)

@@ -61,10 +61,16 @@ object UpdatesTestTags {
 
 /**
  * The Updates feed (spec 4.2): cached rows at once, search and filters over the cache, pull-to-refresh, and a tap
- * on a row opens its Kavita page in another app (http/https only, see [KavitaLink]).
+ * on a row opens its Kavita page in another app (http/https only, see [KavitaLink]). [notificationBanner] is shown
+ * at the top (the app passes the notification-state banner, so a user who never opens Settings still learns that
+ * alerts are off).
  */
 @Composable
-fun UpdatesScreen(viewModel: UpdatesViewModel, modifier: Modifier = Modifier) {
+fun UpdatesScreen(
+    viewModel: UpdatesViewModel,
+    modifier: Modifier = Modifier,
+    notificationBanner: @Composable () -> Unit = {},
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
@@ -74,6 +80,7 @@ fun UpdatesScreen(viewModel: UpdatesViewModel, modifier: Modifier = Modifier) {
     Box(modifier.fillMaxSize()) {
         UpdatesContent(
             state = state,
+            notificationBanner = notificationBanner,
             onRefresh = viewModel::refresh,
             onQueryChange = viewModel::setQuery,
             onKindChange = viewModel::setKind,
@@ -91,6 +98,7 @@ fun UpdatesScreen(viewModel: UpdatesViewModel, modifier: Modifier = Modifier) {
 @Composable
 private fun UpdatesContent(
     state: UpdatesUiState,
+    notificationBanner: @Composable () -> Unit,
     onRefresh: () -> Unit,
     onQueryChange: (String) -> Unit,
     onKindChange: (KindFilter) -> Unit,
@@ -99,6 +107,7 @@ private fun UpdatesContent(
     onOpen: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
+        notificationBanner()
         SearchField(state.query, onQueryChange)
         KindFilters(state.kind, onKindChange)
         if (state.categories.isNotEmpty()) CategoryFilters(state.categories, state.category, onCategoryChange)

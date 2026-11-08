@@ -31,6 +31,9 @@ import com.mbols2510.mangamanager.ui.AppViewModel
 import com.mbols2510.mangamanager.ui.doubles.DoublesViewModel
 import com.mbols2510.mangamanager.ui.jobs.JobsViewModel
 import com.mbols2510.mangamanager.ui.pairing.PairingViewModel
+import com.mbols2510.mangamanager.ui.settings.NotificationBannerSession
+import com.mbols2510.mangamanager.ui.settings.NotificationBannerViewModel
+import com.mbols2510.mangamanager.ui.settings.NotificationPrompt
 import com.mbols2510.mangamanager.ui.settings.SettingsViewModel
 import com.mbols2510.mangamanager.ui.settings.readNotificationStatus
 import com.mbols2510.mangamanager.ui.updates.UpdatesViewModel
@@ -78,6 +81,9 @@ class AppContainer internal constructor(
     val database: AppDatabase by lazy { AppDatabase.build(appContext) }
 
     val credentials = PairedCredentialsHolder()
+
+    /** The Updates screen's notification banner, once dismissed, stays hidden until the process ends. */
+    val notificationBannerSession = NotificationBannerSession()
 
     private val baseUrl = PairedBaseUrl { settingsStore.cachedServerUrl }
 
@@ -231,7 +237,12 @@ class AppContainer internal constructor(
     }
 
     val factory: ViewModelProvider.Factory = viewModelFactory {
-        initializer { AppViewModel(tokenStore, settingsStore, authState) }
+        initializer {
+            AppViewModel(
+                tokenStore, settingsStore, authState,
+                notificationPrompt = NotificationPrompt(settingsStore) { readNotificationStatus(appContext) },
+            )
+        }
         initializer {
             PairingViewModel(
                 tokenStore, settingsStore, authState, updatesRepository, credentials,
@@ -239,6 +250,9 @@ class AppContainer internal constructor(
             )
         }
         initializer { UpdatesViewModel(updatesRepository, credentials::get, ensureReady = ::warmUpIfCold) }
+        initializer {
+            NotificationBannerViewModel(settingsStore, { readNotificationStatus(appContext) }, notificationBannerSession)
+        }
         initializer { DoublesViewModel(serverTools) }
         initializer { JobsViewModel(serverTools) }
         initializer {

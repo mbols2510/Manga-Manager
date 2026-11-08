@@ -120,6 +120,10 @@ debuggable (any computer with USB debugging can read its data) and it exports te
 1. On the web dashboard (login must be enabled), open **Settings > Devices**, name the device and press
    **Create device**.
 2. Copy the pairing code (it starts with `mm1.`) and paste it into the app.
+3. Allow notifications when the app asks, right after pairing (Android 13+; it asks only this once). If you
+   decline, the Updates screen and *Settings > Notifications* show a banner with a button to allow them later.
+   Until then new updates are saved and shown in the app, but no alerts appear, and updates that arrived while
+   notifications were off are not alerted afterwards.
 
 The code carries the server address. It is `web.public_url` when that is set, otherwise the address your browser
 used. **Behind a reverse proxy** (Caddy, Traefik, nginx, Cloudflare) set `web.behind_proxy: true` and/or
