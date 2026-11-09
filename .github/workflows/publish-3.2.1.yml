@@ -14,7 +14,7 @@ env:
   IMAGE: ghcr.io/mbols2510/manga-manager
 jobs:
   release:
-    if: github.repository == 'mbols2510/Manga-Manager' && github.event.before == '58434eb168066ff5ed54fed679f09fdae572fbf0'
+    if: github.repository == 'mbols2510/Manga-Manager' && github.event.before == 'fd90f30a4b55035b39baabf07a94bc74ccec5c8d'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -61,7 +61,7 @@ jobs:
       - name: Verify published image
         run: |
           docker buildx imagetools inspect "$IMAGE:3.2.1"
-          test "$(docker run --rm "$IMAGE:3.2.1" --version)" = '3.2.1'
+          test "$(docker run --rm --entrypoint python "$IMAGE:3.2.1" -m manga_manager --version)" = '3.2.1'
       - name: Publish release from the tested source
         env:
           GH_TOKEN: ${{ github.token }}
