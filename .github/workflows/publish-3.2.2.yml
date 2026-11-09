@@ -14,7 +14,7 @@ env:
   IMAGE: ghcr.io/mbols2510/manga-manager
 jobs:
   release:
-    if: github.repository == 'mbols2510/Manga-Manager' && github.event.before == '77119004e8b5dfc68449ea3f2c9305b8c86a1609'
+    if: github.repository == 'mbols2510/Manga-Manager' && github.event.before == '990a423b18143424116a4698f597921f9a51feac'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -29,10 +29,10 @@ jobs:
           python3 -c "from manga_manager import __version__; assert __version__ == '3.2.2'"
           docker run -d --name manga-release-test-db -e POSTGRES_PASSWORD=test -e POSTGRES_DB=manga_test -p 127.0.0.1:5432:5432 postgres:16-alpine
           for attempt in $(seq 1 30); do
-            if docker exec manga-release-test-db pg_isready -U postgres; then break; fi
+            if docker exec manga-release-test-db pg_isready -h 127.0.0.1 -U postgres; then break; fi
             sleep 1
           done
-          docker exec manga-release-test-db pg_isready -U postgres
+          docker exec manga-release-test-db pg_isready -h 127.0.0.1 -U postgres
       - name: Full Python and PostgreSQL regression suite
         env:
           TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/manga_test
