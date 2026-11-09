@@ -14,7 +14,7 @@ env:
   IMAGE: ghcr.io/mbols2510/manga-manager
 jobs:
   release:
-    if: github.repository == 'mbols2510/Manga-Manager' && github.event.before == '72ee51bc0773632de54384ac7a6e3000ec7f0733'
+    if: github.repository == 'mbols2510/Manga-Manager' && github.event.before == '4f7f57de4ea0764dda03496eecf0593674b0f3da'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
