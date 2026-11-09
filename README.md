@@ -12,9 +12,10 @@ One self-hosted dashboard for a Suwayomi → Kavita manga setup. It replaces fou
 
 One container, one login, one PostgreSQL database.
 
-**3.2.1:** restored the 3.1.0 server baseline, replaced the retired Android app
-with an installable web app, and added a previewed **Process all manga** action
-for double chapters. See [release notes](docs/releases/3.2.1.md) for upgrade details.
+**3.2.2:** fixes the bulk preview's host/container path conflict, uses the existing
+chapter-card design with editable choices, and reduces cover-loading queues on
+both tabs. See [release notes](docs/releases/3.2.2.md). The 3.2.1 release restored
+the 3.1.0 baseline, retired the Android app and introduced the PWA.
 
 ## Install
 
@@ -134,7 +135,9 @@ The default is **official, otherwise newest**. When several official files exist
 the newest official is kept. File size is not a higher priority than official
 status or modification time. These are the same default choices used in the
 individual chapter window; this action does not use a manually selected
-"Largest" strategy from another window.
+"Largest" strategy from another window. In the bulk preview itself you can use
+**Official, else newest / Newest / Largest** for all chapters or select individual
+file cards. Apply keeps exactly those reviewed choices.
 
 Choose **Apply choices** after reviewing. The server processes the reviewed plan
 in the background and shows progress, failures and Kavita-refresh warnings. You
@@ -149,3 +152,22 @@ for manual review. Scans and other Double Chapters writes are blocked while the
 batch is running; it also reserves the existing Move Manga file-operation lock.
 An interrupted server process does not resume the batch: already moved files stay
 recorded in Trash, and you should rescan before making a new preview.
+
+### Double Chapters folder settings
+
+`MANGA_ROOT` in `.env` names the **host** folder that Compose mounts at `/manga`.
+The tool uses **`DC_MANGA_ROOT=/manga` inside the container**, with a Settings
+override for custom mounts. `KAVITA_MANGA_ROOT` is the corresponding path inside
+Kavita when its mount differs. A host path must not be used as the tool's
+container path.
+
+3.2.2 also recognizes a legacy saved container setting that exactly equals the
+old `MANGA_ROOT` host variable, when that host path is unavailable in the container
+and the normal `/manga` directory exists. Existing valid custom paths are kept.
+If the preview still reports an outside-path error, check **Settings → Double
+chapters → Manga folder in this container** and the Kavita folder mapping.
+
+Cover downloads on Updates and Doubles are limited to two at a time near the
+viewport. Doubles covers are cached in `/data/double-chapters/covers` for one hour
+and can still be served from that cache if Kavita is temporarily unavailable.
+The service worker continues to exclude covers and account data from its cache.

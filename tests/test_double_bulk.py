@@ -218,3 +218,88 @@ def test_bulk_endpoints_require_login_and_reject_cross_site_requests(tool):
     for path in ('bulk-preview', 'bulk-apply'):
         assert c.post('/api/double-chapters/' + path).status_code == 401
         assert c.post('/api/double-chapters/' + path, headers={'Origin': 'https://another.example'}).status_code == 403
+
+
+def test_host_manga_root_does_not_override_container_mount(tool, monkeypatch):
+    from manga_manager.settings import Settings
+    root = tool.manga_root
+    monkeypatch.setenv('MANGA_ROOT', '/host/nas/manga')
+    monkeypatch.setenv('DC_MANGA_ROOT', root)
+    monkeypatch.setenv('KAVITA_MANGA_ROOT', '/manga')
+    tool.ctx.db.settings = lambda: {}
+    tool.ctx.settings = Settings(tool.ctx.db)
+    data = tool.load('series', {})
+    for series in data.values():
+        for chapter in series['chapters']:
+            for file in chapter['files']:
+                file['filePath'] = '/manga/' + Path(file['filePath']).name
+    tool.save('series', data)
+    assert tool.manga_root == root
+    plan = tool.bulk.preview()
+    assert plan['chapterCount'] == 2 and plan['skipped'] == []
+    tool.bulk.start(plan['fingerprint'])
+    wait_finished(tool)
+    assert tool.bulk.status()['moved'] == 3
+
+
+def test_default_container_path_ignores_compose_host_variable(tool, monkeypatch):
+    from manga_manager.settings import Settings
+    monkeypatch.setenv('MANGA_ROOT', '/host/nas/manga')
+    monkeypatch.delenv('DC_MANGA_ROOT', raising=False)
+    tool.ctx.db.settings = lambda: {}
+    tool.ctx.settings = Settings(tool.ctx.db)
+    assert tool.manga_root == '/manga'
+
+
+def test_legacy_saved_host_path_recovers_only_the_known_mount(tool, monkeypatch):
+    host = '/host/legacy/manga'
+    tool.ctx.settings = SimpleNamespace(get=lambda key, default=None: host if key == 'dc.manga_root' else default)
+    monkeypatch.setenv('MANGA_ROOT', host)
+    monkeypatch.setenv('DC_MANGA_ROOT', '/manga')
+    real_isdir, real_exists = os.path.isdir, os.path.exists
+    monkeypatch.setattr(os.path, 'isdir', lambda p: True if p == '/manga' else real_isdir(p))
+    monkeypatch.setattr(os.path, 'exists', lambda p: False if p == host else real_exists(p))
+    assert tool.manga_root == '/manga'
+    # Existing explicitly configured folders must still win over defaults.
+    monkeypatch.setattr(os.path, 'exists', lambda p: True if p == host else real_exists(p))
+    assert tool.manga_root == host
+
+
+def test_path_mapping_requires_a_full_directory_prefix(tool):
+    original = tool.ctx.settings
+    tool.ctx.settings = SimpleNamespace(get=lambda key, default=None: '/kavita' if key == 'dc.kavita_manga_root' else original.get(key, default))
+    assert tool.is_safe_path(tool.kavita_path_to_local('/kavita/official-new.cbz'))
+    assert not tool.is_safe_path(tool.kavita_path_to_local('/kavita-backup/official-new.cbz'))
+
+
+def test_apply_honors_reviewed_file_selections(api, tool):
+    plan = api.post('/api/double-chapters/bulk-preview').json
+    choices = [{'seriesId': p['seriesId'], 'chapterId': p['chapterId'], 'keepFileId': p['keep']['id']} for p in plan['chapters']]
+    choices[0]['keepFileId'] = 3  # Newest fan file, rather than the default official file.
+    assert api.post('/api/double-chapters/bulk-apply', json={'token': plan['token'], 'selections': choices}).status_code == 202
+    wait_finished(tool)
+    assert (Path(tool.manga_root) / 'fan-newest.cbz').exists()
+    assert not (Path(tool.manga_root) / 'official-new.cbz').exists()
+    assert tool.bulk.status()['failed'] == 0
+
+
+def test_unreviewed_file_choice_cannot_move_anything(api, tool):
+    plan = api.post('/api/double-chapters/bulk-preview').json
+    choices = [{'seriesId': p['seriesId'], 'chapterId': p['chapterId'], 'keepFileId': p['keep']['id']} for p in plan['chapters']]
+    choices[0]['keepFileId'] = 9999
+    assert api.post('/api/double-chapters/bulk-apply', json={'token': plan['token'], 'selections': choices}).status_code == 400
+    assert not tool.trash_list()
+
+
+def test_cover_cache_and_conditional_request_avoid_repeated_kavita_calls(api, tool):
+    calls = []
+    def cover(sid):
+        calls.append(sid)
+        return b'cover bytes', 'image/png'
+    tool.client.get_cover = cover
+    first = api.get('/api/double-chapters/cover/1')
+    assert first.status_code == 200 and first.data == b'cover bytes'
+    assert 'private' in first.headers['Cache-Control']
+    again = api.get('/api/double-chapters/cover/1', headers={'If-None-Match': first.headers['ETag']})
+    assert again.status_code == 304
+    assert calls == [1]

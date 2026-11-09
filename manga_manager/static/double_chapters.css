@@ -54,9 +54,11 @@
 .dc-process-status { margin: 16px 0; padding: 16px; border: 1px solid var(--rule); border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .dc-process-series { border-bottom: 1px solid var(--rule); padding: 12px 0; }
 .dc-process-series summary { cursor: pointer; font-weight: 900; }
-.dc-process-chapter { padding: 12px 0; overflow-wrap: anywhere; }
-.dc-process-chapter p { margin: 6px 0; font-size: .875rem; }
-.dc-process-keep { color: var(--ok); }
-.dc-process-trash { color: var(--ink-soft); }
+.dc-process-series > summary { padding: 8px 0 18px; font-size: 1.0625rem; }
+.dc-process-skipped { margin-top: 18px; padding: 16px; border: 1px solid var(--rule); border-radius: 12px; color: var(--ink-soft); font-size: .875rem; overflow-wrap: anywhere; }
+.dc-process-skipped summary { cursor: pointer; font-weight: 700; }
+.dc-process-skipped ul { padding-left: 20px; }
+.dc-process-skipped li { margin: 8px 0; }
+#process-strategies[hidden] { display: none; }
 @media (max-width: 760px) { .top { flex-wrap: wrap; gap: 10px; } }
 @media (max-width: 760px) { .dc-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 20px 14px; } }

@@ -67,11 +67,17 @@
     <div class="panel-head"><h2 id="process-title">Process all manga</h2><button class="btn sm" id="process-close" type="button">Close</button></div>
     <p>Review the default choices: keep an official file when available (the newest official if several exist), otherwise keep the newest file. Other files move to Trash.</p>
     <p class="dc-note" id="process-summary" role="status" aria-live="polite"></p>
+    <div class="dc-bulk" id="process-strategies" hidden>
+      <span id="process-select-count"></span>
+      <button class="btn sm" type="button" data-strategy="official">Official, else newest</button>
+      <button class="btn sm" type="button" data-strategy="newest">Newest</button>
+      <button class="btn sm" type="button" data-strategy="largest">Largest</button>
+    </div>
     <div id="process-preview"></div>
   </div>
   <div class="dc-foot">
     <button class="btn" id="process-refresh" type="button">Refresh preview</button>
-    <button class="btn sig" id="process-apply" type="button" disabled>Apply reviewed choices</button>
+    <button class="btn sig" id="process-apply" type="button" disabled>Apply to all chapters</button>
   </div>
 </dialog>
 <div class="toast hidden" id="toast" role="status"></div>

@@ -414,11 +414,18 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         return jsonify({"started": started, "message": "Run started" if started else "A run is already in progress"}), (
             202 if started else 409)
 
+    thumb_slots = threading.BoundedSemaphore(2)
+
     @app.get("/thumb/<int:manga_id>.png")
     def thumb(manga_id: int):
         path = covers.cached_path(manga_id)
         if not path.exists():
-            path = covers.get_png(manga_id)
+            if not thumb_slots.acquire(blocking=False):
+                return "Thumbnail queue is busy", 503, {"Retry-After": "2", "Cache-Control": "no-store"}
+            try:
+                path = covers.get_png(manga_id)
+            finally:
+                thumb_slots.release()
         if not path or not path.exists():
             abort(404)
         resp = send_file(path, mimetype="image/png", max_age=86400)

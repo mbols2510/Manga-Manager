@@ -10,6 +10,7 @@ import io
 import logging
 import os
 import shutil
+import threading
 from pathlib import Path
 
 from PIL import Image, UnidentifiedImageError
@@ -28,6 +29,7 @@ class CoverStore:
         self.export_dir = export_dir
         self.dry_run = dry_run
         self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self._locks = [threading.Lock() for _ in range(32)]
 
     def cached_path(self, manga_id: int) -> Path:
         return self.cache_dir / f"{manga_id}.png"
@@ -55,6 +57,11 @@ class CoverStore:
             return None
 
     def get_png(self, manga_id: int, refresh: bool = False) -> Path | None:
+        # Spotlight and cards can ask for the same missing cover simultaneously.
+        with self._locks[manga_id % len(self._locks)]:
+            return self._get_png(manga_id, refresh)
+
+    def _get_png(self, manga_id: int, refresh: bool = False) -> Path | None:
         """Return the cached PNG for a Suwayomi manga, creating/refreshing it when needed.
 
         Sources, in order: the thumbnail file Suwayomi stored on disk, then Suwayomi's

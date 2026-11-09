@@ -7,6 +7,7 @@ and `meta` (last scan, last digest week + snapshot).
 from __future__ import annotations
 
 import logging
+import hashlib
 import os
 import re
 import shutil
@@ -22,6 +23,7 @@ from flask import Blueprint, Response, current_app, jsonify, render_template, re
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from .. import __version__, notify
+from ..image_cache import ImageBusy, ImageCache
 from ..settings import WEEKDAYS, Setting, register
 from .double_bulk import BulkConflict, BulkProcessor
 
@@ -36,7 +38,8 @@ register(
     Setting("dc.library_ids", "Kavita library IDs", "Double chapters", "text", "KAVITA_LIBRARY_IDS", "",
             hint="Comma separated. Empty = scan every library."),
     Setting("dc.scan_interval_minutes", "Scan every (minutes)", "Double chapters", "int", "SCAN_INTERVAL_MINUTES", 15),
-    Setting("dc.manga_root", "Manga folder in this container", "Double chapters", "text", "MANGA_ROOT", "/manga"),
+    Setting("dc.manga_root", "Manga folder in this container", "Double chapters", "text", "DC_MANGA_ROOT", "/manga",
+            hint="Container path, normally /manga. MANGA_ROOT in .env is the host-side Compose mount."),
     Setting("dc.kavita_manga_root", "Manga folder as Kavita sees it", "Double chapters", "text", "KAVITA_MANGA_ROOT", "",
             hint="Only when Kavita mounts the share at a different path; empty = same as above"),
     Setting("dc.trash_retention_days", "Delete trashed files after (days)", "Double chapters", "int",
@@ -104,7 +107,7 @@ class KavitaClient:
     def _request(self, method: str, path: str, retry_auth: bool = True, **kw) -> requests.Response:
         headers = {"Authorization": f"Bearer {self.authenticate()}", **(kw.pop("headers", None) or {})}
         try:
-            resp = self._http.request(method, f"{self.base_url}{path}", headers=headers, timeout=60, **kw)
+            resp = self._http.request(method, f"{self.base_url}{path}", headers=headers, timeout=kw.pop("timeout", 60), **kw)
         except requests.RequestException as exc:
             raise KavitaError(f"Kavita request failed: {exc}") from exc
         if resp.status_code == 401 and retry_auth:
@@ -135,7 +138,7 @@ class KavitaClient:
         return resp.json()
 
     def get_cover(self, series_id: int) -> tuple[bytes, str]:
-        resp = self._request("GET", "/api/image/series-cover", params={"seriesId": series_id, "apiKey": self.api_key})
+        resp = self._request("GET", "/api/image/series-cover", params={"seriesId": series_id, "apiKey": self.api_key}, timeout=(5, 15))
         if resp.status_code != 200:
             raise KavitaError(f"Failed to fetch cover for series {series_id} ({resp.status_code})")
         return resp.content, resp.headers.get("content-type", "image/png")
@@ -298,6 +301,7 @@ class DoubleChapters:
         self.db = ctx.db
         self.lock = threading.RLock()
         self.bulk = BulkProcessor(self)
+        self.covers = ImageCache(Path(ctx.cfg.data_dir) / "double-chapters" / "covers")
         self.scanning = False
         self.scan_done = 0
         self.scan_total = 0
@@ -318,7 +322,14 @@ class DoubleChapters:
 
     @property
     def manga_root(self) -> str:
-        return str(self.s("dc.manga_root") or "/manga")
+        root = str(self.s("dc.manga_root") or "/manga")
+        # Older versions saved Compose's host-side MANGA_ROOT as a container setting.
+        # Recover only that exact legacy collision, and only when the standard mount exists.
+        host_root = os.environ.get("MANGA_ROOT", "")
+        if (os.environ.get("DC_MANGA_ROOT", "") in ("", "/manga") and root == host_root and root != "/manga"
+                and os.path.isdir("/manga") and not os.path.exists(root)):
+            return "/manga"
+        return root
 
     @property
     def kavita_root(self) -> str:
@@ -332,14 +343,20 @@ class DoubleChapters:
         return [int(x) for x in str(self.s("dc.library_ids") or "").split(",") if x.strip().isdigit()]
 
     def kavita_path_to_local(self, path: str) -> str:
-        kroot, lroot = self.kavita_root.rstrip("/"), self.manga_root.rstrip("/")
-        if kroot and path.startswith(kroot):
-            return lroot + path[len(kroot):]
+        if not isinstance(path, str) or not path:
+            raise ValueError("File path is missing")
+        path = os.path.normpath(path)
+        kroot, lroot = os.path.normpath(self.kavita_root), os.path.normpath(self.manga_root)
+        if path == kroot or path.startswith(kroot.rstrip(os.sep) + os.sep):
+            return os.path.normpath(os.path.join(lroot, os.path.relpath(path, kroot)))
         return path
 
     def is_safe_path(self, local_path: str) -> bool:
         root, target = os.path.realpath(self.manga_root), os.path.realpath(local_path)
-        return target == root or target.startswith(root + os.sep)
+        try:
+            return os.path.commonpath([root, target]) == root
+        except ValueError:
+            return False
 
     def is_in_trash(self, path: str) -> bool:
         root, target = os.path.realpath(self.trash_dir), os.path.realpath(path)
@@ -642,6 +659,7 @@ class DoubleChapters:
             "digestHour": int(self.s("dc.notify_hour") or 0),
             "lastDigestWeek": meta.get("lastDigestWeek"),
             "kavitaConfigured": bool(self.ctx.cfg.kavita_url and self.ctx.cfg.kavita_api_key),
+            "bulk": self.bulk.status(),
         }
 
     def trash_list(self) -> list[dict]:
@@ -725,13 +743,15 @@ def init(ctx) -> Blueprint:
             data = bulk_signer().loads(body["token"], max_age=900)
             if not isinstance(data, dict) or data.get("user") != session.get("user"):
                 return err("This preview belongs to another session.", 403)
-            return jsonify(tool.bulk.start(data.get("fingerprint"))), 202
+            return jsonify(tool.bulk.start(data.get("fingerprint"), body.get("selections"))), 202
         except SignatureExpired:
             return err("The preview expired. Open a new preview.", 409)
         except BadSignature:
             return err("Invalid preview. Open a new preview.")
         except BulkConflict as exc:
             return err(str(exc), 409)
+        except ValueError as exc:
+            return err(str(exc))
 
     @bp.get("/api/double-chapters/bulk-status")
     def bulk_status():
@@ -779,10 +799,15 @@ def init(ctx) -> Blueprint:
     @bp.get("/api/double-chapters/cover/<int:series_id>")
     def cover(series_id: int):
         try:
-            data, content_type = tool.client.get_cover(series_id)
+            key = f"{ctx.cfg.kavita_url}:{ctx.cfg.kavita_api_key}:{series_id}"
+            data, content_type = tool.covers.get(key, lambda: tool.client.get_cover(series_id))
+        except ImageBusy as exc:
+            return jsonify({"error": str(exc)}), 503, {"Retry-After": "2", "Cache-Control": "no-store"}
         except KavitaError as exc:
             return err(str(exc), 502)
-        return Response(data, mimetype=content_type, headers={"Cache-Control": "max-age=3600"})
+        response = Response(data, mimetype=content_type, headers={"Cache-Control": "private, max-age=3600"})
+        response.set_etag(hashlib.sha256(data).hexdigest())
+        return response.make_conditional(request)
 
     @bp.post("/api/double-chapters/series/<int:series_id>/chapters/<int:chapter_id>/remediate")
     def remediate(series_id: int, chapter_id: int):

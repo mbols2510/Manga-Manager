@@ -41,7 +41,7 @@
   const post = (path, body) => api(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body ?? {}) });
 
   // ------------------------------------------------------------------ status
-  let wasScanning = false;
+  let wasScanning = false, lastScanValue;
   async function refreshStatus() {
     const note = $('#status');
     try {
@@ -59,25 +59,41 @@
       $('#digest-schedule').textContent = !s.digestEnabled ? 'The weekly digest is turned off.'
         : !s.ntfyConfigured ? 'The weekly digest needs notifications to be set up first (Settings → Notifications).'
         : `Sent every ${s.digestWeekday} at ${String(s.digestHour).padStart(2, '0')}:00${s.lastDigestWeek ? ` · last sent in ${s.lastDigestWeek}` : ''}.`;
-      if (wasScanning && !s.scanning) refreshSeries();
+      if ((wasScanning && !s.scanning) || (lastScanValue !== undefined && lastScanValue !== s.lastScan)) refreshSeries();
       wasScanning = s.scanning;
+      lastScanValue = s.lastScan;
+      window.DC_STATUS = s;
+      window.dispatchEvent(new CustomEvent('dc-status', {detail: s}));
+      return s;
     } catch (e) { note.textContent = 'Could not reach the backend'; }
   }
 
   // ------------------------------------------------------------------ series grid
+  let refreshingSeries = false;
   async function refreshSeries() {
+    if (refreshingSeries) return;
+    refreshingSeries = true;
+    try {
     const list = await api('/series');
     const grid = $('#series-grid');
-    grid.innerHTML = '';
+    const existing = new Map([...grid.children].map(card => [Number(card.dataset.seriesId), card]));
     $('#empty-state').classList.toggle('hidden', list.length > 0);
     $('#dash-count').textContent = list.length ? `(${list.length})` : '';
     for (const s of list) {
-      const card = document.createElement('button');
-      card.type = 'button'; card.className = 'dc-card';
-      card.innerHTML = `<div class="dc-cover"><img loading="lazy" alt="" src="${API}/cover/${s.id}"><span class="dc-count">${s.chapterCount} chapter${s.chapterCount === 1 ? '' : 's'}</span></div><span class="dc-name">${esc(s.name)}</span>`;
+      let card = existing.get(s.id);
+      if (!card) {
+        card = document.createElement('button');
+        card.type = 'button'; card.className = 'dc-card'; card.dataset.seriesId = s.id;
+        card.innerHTML = `<div class="dc-cover"><img alt="" data-cover-src="${API}/cover/${s.id}"><span class="dc-count"></span></div><span class="dc-name"></span>`;
+        grid.appendChild(card);
+      }
+      existing.delete(s.id);
+      card.querySelector('.dc-count').textContent = `${s.chapterCount} chapter${s.chapterCount === 1 ? '' : 's'}`;
+      card.querySelector('.dc-name').textContent = s.name;
       card.onclick = () => openSeries(s.id, s.name);
-      grid.appendChild(card);
     }
+    existing.forEach(card => card.remove());
+    } finally { refreshingSeries = false; }
   }
 
   // ------------------------------------------------------------------ series panel
@@ -275,9 +291,21 @@
     } catch (e) { toast(e.message); }
   };
 
-  const tick = () => Promise.all([refreshStatus(), refreshSeries(), refreshTrash()]).catch(() => {});
+  let statusInFlight = false, pollTimer;
+  async function poll() {
+    clearTimeout(pollTimer);
+    if (statusInFlight || document.hidden) { pollTimer = setTimeout(poll, 15000); return; }
+    statusInFlight = true;
+    let status;
+    try { status = await refreshStatus(); }
+    finally {
+      statusInFlight = false;
+      pollTimer = setTimeout(poll, status?.scanning || status?.bulk?.running ? 2000 : 15000);
+    }
+  }
+  const tick = () => Promise.all([poll(), refreshSeries(), refreshTrash()]).catch(() => {});
   tick();
   window.addEventListener('dc-bulk-complete', tick);
-  setInterval(tick, 30000);
-  setInterval(refreshStatus, 4000);
+  window.addEventListener('dc-request-status', poll);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) tick(); });
 })();

@@ -182,7 +182,7 @@ function card(item) {
     : "";
   const shown = ["new", "replaced", "duplicate"].map(row).join("");
   const img = item.thumbnail
-    ? `<img src="${esc(item.thumbnail)}" alt="" loading="lazy" onerror="this.remove()">`
+    ? `<img data-cover-src="${esc(item.thumbnail)}" alt="">`
     : "";
   const href = item.kavita_url ? ` href="${esc(item.kavita_url)}" target="_blank" rel="noopener"` : "";
   // A blurred cover is a plain box with a reveal button; the title stays a link.
@@ -251,7 +251,7 @@ function spotlight(items) {
   const when = new Date(pick.created_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
   el.className = "spot " + catClass(pick.category);
   el.innerHTML = `<div class="cover" style="--cat:var(--${esc(String(pick.category).toLowerCase())}, var(--regular))"><span class="plate" aria-hidden="true"><span>${esc(pick.title)}</span></span>
-      <img src="${esc(pick.thumbnail)}" alt="" crossorigin="anonymous" onerror="this.remove()"><span class="sticker">New series</span></div>
+      <img data-cover-src="${esc(pick.thumbnail)}" alt="" crossorigin="anonymous"><span class="sticker">New series</span></div>
     <div class="tx"><span class="sticker">New series</span><h2>${esc(pick.title)}</h2>
       <p>${n} chapter${n === 1 ? "" : "s"} just landed in ${esc(pick.category)}, at ${esc(when)}.</p>
       <div class="acts">${pick.kavita_url ? `<a class="btn sig" href="${esc(pick.kavita_url)}" target="_blank" rel="noopener">Open in Kavita</a>` : ""}

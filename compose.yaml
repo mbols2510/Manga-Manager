@@ -15,6 +15,7 @@ services:
       PGID: ${PGID:-1000}
       UMASK: "002"
       TZ: ${TZ:-Europe/Brussels}
+      DC_MANGA_ROOT: /manga                       # container path; MANGA_ROOT below is a host path
     ports:
       - "${WEB_PORT:-8080}:8080"
     volumes:
