@@ -12,6 +12,10 @@ One self-hosted dashboard for a Suwayomi → Kavita manga setup. It replaces fou
 
 One container, one login, one PostgreSQL database.
 
+**3.2.1:** restored the 3.1.0 server baseline, replaced the retired Android app
+with an installable web app, and added a previewed **Process all manga** action
+for double chapters. See [release notes](docs/releases/3.2.1.md) for upgrade details.
+
 ## Install
 
 You need Docker with Compose and a PostgreSQL server you already run. Put its address in `DATABASE_URL`.
@@ -98,7 +102,7 @@ More on the move pipeline: [docs/how-it-works.md](docs/how-it-works.md), [docs/c
 
 Combines [Move Manga](https://github.com/mbols2510/Move_Manga), Kavita Double Chapters,
 Kavita Collection Management and CBZ ComicInfo Editor.
-# Install the web app (PWA)
+## Install the web app (PWA)
 
 Open your Manga Manager address over HTTPS (for example,
 `https://manga-manager.tech-bol.be`). On Chrome/Edge or Android, use **Install app**
