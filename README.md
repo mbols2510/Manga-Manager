@@ -149,4 +149,3 @@ for manual review. Scans and other Double Chapters writes are blocked while the
 batch is running; it also reserves the existing Move Manga file-operation lock.
 An interrupted server process does not resume the batch: already moved files stay
 recorded in Trash, and you should rescan before making a new preview.
-
