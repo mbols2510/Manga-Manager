@@ -268,13 +268,16 @@
     if (b.dataset.tab === 'trash') refreshTrash();
   });
   $('#scan-now').onclick = async () => {
-    const r = await post('/scan');
-    toast(r.started ? 'Scan started' : 'A scan is already running');
-    setTimeout(() => { refreshStatus(); refreshSeries(); }, 1500);
+    try {
+      const r = await post('/scan');
+      toast(r.started ? 'Scan started' : 'A scan is already running');
+      setTimeout(() => { refreshStatus(); refreshSeries(); }, 1500);
+    } catch (e) { toast(e.message); }
   };
 
   const tick = () => Promise.all([refreshStatus(), refreshSeries(), refreshTrash()]).catch(() => {});
   tick();
+  window.addEventListener('dc-bulk-complete', tick);
   setInterval(tick, 30000);
   setInterval(refreshStatus, 4000);
 })();

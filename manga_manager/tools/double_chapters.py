@@ -18,10 +18,12 @@ from pathlib import Path
 from typing import Any
 
 import requests
-from flask import Blueprint, Response, jsonify, render_template, request, session
+from flask import Blueprint, Response, current_app, jsonify, render_template, request, session
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from .. import __version__, notify
 from ..settings import WEEKDAYS, Setting, register
+from .double_bulk import BulkConflict, BulkProcessor
 
 log = logging.getLogger("double_chapters")
 
@@ -295,6 +297,7 @@ class DoubleChapters:
         self.ctx = ctx
         self.db = ctx.db
         self.lock = threading.RLock()
+        self.bulk = BulkProcessor(self)
         self.scanning = False
         self.scan_done = 0
         self.scan_total = 0
@@ -387,9 +390,10 @@ class DoubleChapters:
         return [self.enrich_chapter(c) for c in dups]
 
     def run_scan(self) -> None:
-        if self.scanning:
-            return
-        self.scanning, self.last_error = True, None
+        with self.lock:
+            if self.scanning or self.bulk.running:
+                return
+            self.scanning, self.last_error = True, None
         self.scan_done = self.scan_total = 0
         try:
             series_list = self.client.get_all_series(self.library_ids() or None)
@@ -435,9 +439,11 @@ class DoubleChapters:
             self.save("series", series)
 
     # -- remediation ------------------------------------------------------------
-    def remediate_chapter(self, series_id: int, chapter_id: int, keep_file_id: int) -> dict:
+    def remediate_chapter(self, series_id: int, chapter_id: int, keep_file_id: int, *, _bulk=False) -> dict:
         """Move every file but `keep_file_id` to the trash. Kavita is rescanned by the caller, once per batch."""
         with self.lock:
+            if self.scanning or (self.bulk.running and not _bulk):
+                raise BulkConflict("A scan or bulk operation is running. Wait for it to finish.")
             all_series = self.load("series", {})
             trash = self.load("trash", {})
             key = str(series_id)
@@ -450,13 +456,20 @@ class DoubleChapters:
             if not any(f["id"] == keep_file_id for f in chapter["files"]):
                 raise ValueError("keepFileId does not match any file on this chapter")
 
+            kept = next(f for f in chapter["files"] if f["id"] == keep_file_id)
+            keep_path = self.kavita_path_to_local(kept["filePath"])
+            if not self.is_safe_path(keep_path) or not os.path.isfile(keep_path):
+                raise ValueError("The file to keep is missing or outside the manga folder. Rescan first.")
+
             moved = []
+            remaining = [kept]
             for f in chapter["files"]:
                 if f["id"] == keep_file_id:
                     continue
                 local = self.kavita_path_to_local(f["filePath"])
                 if not self.is_safe_path(local):
                     log.error("Refusing to touch path outside the manga folder: %s", local)
+                    remaining.append(f)
                     continue
                 if not os.path.exists(local):
                     log.warning("File no longer exists on disk, skipping: %s", local)
@@ -473,9 +486,14 @@ class DoubleChapters:
                          "seriesName": series.get("name"), "libraryId": series.get("libraryId"), "chapterId": chapter_id,
                          "size": f["bytes"], "deletedAt": now_iso()}
                 trash[entry["id"]] = entry
+                # Persist every successful move, even if a later file in this batch fails.
+                self.save("trash", trash)
                 moved.append(entry)
 
-            series["chapters"] = [c for c in series["chapters"] if c["id"] != chapter_id]
+            if len(remaining) > 1:
+                chapter["files"] = remaining
+            else:
+                series["chapters"] = [c for c in series["chapters"] if c["id"] != chapter_id]
             if not series["chapters"]:
                 all_series.pop(key, None)
             self.save("series", all_series)
@@ -681,6 +699,44 @@ def init(ctx) -> Blueprint:
     def err(message: str, code: int = 400):
         return jsonify({"error": message}), code
 
+    @bp.before_request
+    def protect_bulk_work():
+        if request.method in ("POST", "PUT", "PATCH", "DELETE") and tool.bulk.running:
+            return err("Bulk processing is running. Wait for it to finish.", 409)
+
+    def bulk_signer():
+        return URLSafeTimedSerializer(current_app.secret_key, salt="double-chapters-bulk-preview")
+
+    @bp.post("/api/double-chapters/bulk-preview")
+    def bulk_preview():
+        try:
+            plan = tool.bulk.preview()
+        except BulkConflict as exc:
+            return err(str(exc), 409)
+        plan["token"] = bulk_signer().dumps({"fingerprint": plan.pop("fingerprint"), "user": session.get("user")})
+        return jsonify(plan)
+
+    @bp.post("/api/double-chapters/bulk-apply")
+    def bulk_apply():
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict) or not isinstance(body.get("token"), str):
+            return err("Review a preview before applying.")
+        try:
+            data = bulk_signer().loads(body["token"], max_age=900)
+            if not isinstance(data, dict) or data.get("user") != session.get("user"):
+                return err("This preview belongs to another session.", 403)
+            return jsonify(tool.bulk.start(data.get("fingerprint"))), 202
+        except SignatureExpired:
+            return err("The preview expired. Open a new preview.", 409)
+        except BadSignature:
+            return err("Invalid preview. Open a new preview.")
+        except BulkConflict as exc:
+            return err(str(exc), 409)
+
+    @bp.get("/api/double-chapters/bulk-status")
+    def bulk_status():
+        return jsonify(tool.bulk.status())
+
     @bp.get("/double-chapters")
     def page():
         return render_template("double_chapters.html", page_title="Double chapters", active="double",
@@ -733,6 +789,8 @@ def init(ctx) -> Blueprint:
         body = request.get_json(silent=True) or {}
         try:
             return jsonify(tool.remediate_chapter(series_id, chapter_id, int(body.get("keepFileId", -1))))
+        except BulkConflict as exc:
+            return err(str(exc), 409)
         except (ValueError, TypeError) as exc:
             return err(str(exc))
 

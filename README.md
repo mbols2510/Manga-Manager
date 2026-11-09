@@ -118,3 +118,31 @@ workers or normal PWA installation. Localhost works for development.
 Keep your existing reverse-proxy and login configuration. PWA support does not
 require an Android APK, device token, or new server component.
 
+## Process all double chapters
+
+In **Doubles**, click **Process all manga…**. This previews every manga in the
+latest duplicate scan, including manga outside the currently open series panel.
+Expand each manga to inspect the chapter choices, files to keep, and files to
+move to Trash, with chapter/file totals and the current trash-retention period.
+Opening or closing a preview does not move any files.
+
+The default is **official, otherwise newest**. When several official files exist,
+the newest official is kept. File size is not a higher priority than official
+status or modification time. These are the same default choices used in the
+individual chapter window; this action does not use a manually selected
+"Largest" strategy from another window.
+
+Choose **Apply choices** after reviewing. The server processes the reviewed plan
+in the background and shows progress, failures and Kavita-refresh warnings. You
+can close or reload the page and reconnect to the running operation. Kavita gets
+one rescan per affected manga and the existing read-status reconciliation runs.
+Files remain restorable through **Trash** until your configured retention period
+expires or you delete them permanently.
+
+Previews expire after 15 minutes. A changed scan, file, or folder setting requires
+a fresh preview. Chapters with unavailable, unsafe or shared paths are skipped
+for manual review. Scans and other Double Chapters writes are blocked while the
+batch is running; it also reserves the existing Move Manga file-operation lock.
+An interrupted server process does not resume the batch: already moved files stay
+recorded in Trash, and you should rescan before making a new preview.
+

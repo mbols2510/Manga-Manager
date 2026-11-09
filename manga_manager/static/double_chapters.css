@@ -51,4 +51,12 @@
 .dc-preview pre { margin: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: .875rem; color: var(--ink-soft); }
 .dc-preview .row span { font-size: .75rem; font-weight: 700; border: 1px solid var(--rule); border-radius: 999px; padding: 4px 12px; }
 .toast.hidden { display: none; }
+.dc-process-status { margin: 16px 0; padding: 16px; border: 1px solid var(--rule); border-radius: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dc-process-series { border-bottom: 1px solid var(--rule); padding: 12px 0; }
+.dc-process-series summary { cursor: pointer; font-weight: 900; }
+.dc-process-chapter { padding: 12px 0; overflow-wrap: anywhere; }
+.dc-process-chapter p { margin: 6px 0; font-size: .875rem; }
+.dc-process-keep { color: var(--ok); }
+.dc-process-trash { color: var(--ink-soft); }
+@media (max-width: 760px) { .top { flex-wrap: wrap; gap: 10px; } }
 @media (max-width: 760px) { .dc-grid { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 20px 14px; } }

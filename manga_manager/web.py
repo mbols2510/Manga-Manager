@@ -78,6 +78,7 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
     action_token = hmac.new(secret.encode(), b"action:dc-scan", "sha256").hexdigest()[:32]
     if ctx is not None:
         ctx.extras["action_token"] = action_token
+        ctx.extras["scheduler"] = scheduler
     users = UserStore(history.db, cfg.auth_users) if cfg.auth_enabled else None
     limiter = limiter or LoginLimiter()
 
