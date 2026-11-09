@@ -1,0 +1,73 @@
+name: Publish requested 3.2.2 release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-3.2.2.yml']
+permissions:
+  contents: write
+  packages: write
+concurrency:
+  group: requested-release-3.2.2
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 77119004e8b5dfc68449ea3f2c9305b8c86a1609
+  IMAGE: ghcr.io/mbols2510/manga-manager
+jobs:
+  release:
+    if: github.repository == 'mbols2510/Manga-Manager' && github.event.before == '77119004e8b5dfc68449ea3f2c9305b8c86a1609'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+      - name: Verify exact source and start isolated PostgreSQL
+        run: |
+          python3 -c "from manga_manager import __version__; assert __version__ == '3.2.2'"
+          docker run -d --name manga-release-test-db -e POSTGRES_PASSWORD=test -e POSTGRES_DB=manga_test -p 127.0.0.1:5432:5432 postgres:16-alpine
+          for attempt in $(seq 1 30); do
+            if docker exec manga-release-test-db pg_isready -U postgres; then break; fi
+            sleep 1
+          done
+          docker exec manga-release-test-db pg_isready -U postgres
+      - name: Full Python and PostgreSQL regression suite
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/manga_test
+        run: |
+          pip install -r requirements.txt pytest
+          pytest -q
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:3.2.2
+            ${{ env.IMAGE }}:3.2
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.version=3.2.2
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
+            org.opencontainers.image.source=https://github.com/mbols2510/Manga-Manager
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify published image
+        run: |
+          docker buildx imagetools inspect "$IMAGE:3.2.2"
+          test "$(docker run --rm --entrypoint python "$IMAGE:3.2.2" -m manga_manager --version)" = '3.2.2'
+      - name: Publish release from the tested source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create v3.2.2 --repo "$GH_REPO" --target "$SOURCE_SHA" --title "Manga Manager 3.2.2" --notes-file docs/releases/3.2.2.md --latest
