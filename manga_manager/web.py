@@ -28,7 +28,7 @@ log = logging.getLogger(__name__)
 # first account) may open or change them.
 ADMIN_ENDPOINTS = {"core.settings_page", "core.settings_get", "core.settings_save", "core.settings_restart",
                    "core.test_notification"}
-PUBLIC_ENDPOINTS = {"login", "signup", "health", "core.health", "static"}
+PUBLIC_ENDPOINTS = {"login", "signup", "health", "core.health", "static", "manifest", "service_worker", "offline"}
 
 
 ALIAS_MAX = 300           # longest title accepted for an alias (#12)
@@ -169,6 +169,33 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         if cfg.auth_enabled and resp.mimetype in ("text/html", "application/json"):
             resp.headers.setdefault("Cache-Control", "no-store")
         return resp
+
+    # ------------------------------------------------------------ installable web app
+    @app.get("/manifest.webmanifest")
+    def manifest():
+        root = url_for("index")
+        data = {"id": root, "name": "Manga Manager", "short_name": "Manga Manager",
+                "description": "Your manga library, updates and chapter tools",
+                "start_url": root, "scope": root, "display": "standalone",
+                "background_color": "#08080a", "theme_color": "#08080a",
+                "icons": [{"src": url_for("static", filename=f"icons/icon-{size}.png"),
+                           "sizes": f"{size}x{size}", "type": "image/png", "purpose": "any maskable"}
+                          for size in (192, 512)]}
+        response = jsonify(data)
+        response.mimetype = "application/manifest+json"
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+    @app.get("/service-worker.js")
+    def service_worker():
+        assets = [url_for("static", filename=name) for name in
+                  ("app.css", "tools.css", "pwa.js", "icons/icon-180.png", "icons/icon-192.png", "icons/icon-512.png")]
+        return app.response_class(render_template("service-worker.js", assets=assets, version=__version__),
+                                  mimetype="application/javascript", headers={"Cache-Control": "no-store"})
+
+    @app.get("/offline")
+    def offline():
+        return render_template("offline.html")
 
     # ------------------------------------------------------------ login
     def auth_page(mode: str, error: str = "", username: str = "", status: int = 200):

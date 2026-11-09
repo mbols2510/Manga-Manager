@@ -98,3 +98,23 @@ More on the move pipeline: [docs/how-it-works.md](docs/how-it-works.md), [docs/c
 
 Combines [Move Manga](https://github.com/mbols2510/Move_Manga), Kavita Double Chapters,
 Kavita Collection Management and CBZ ComicInfo Editor.
+# Install the web app (PWA)
+
+Open your Manga Manager address over HTTPS (for example,
+`https://manga-manager.tech-bol.be`). On Chrome/Edge or Android, use **Install app**
+when offered, or the browser menu's **Install app / Add to home screen**.
+On iPhone/iPad, open it in Safari and choose **Share → Add to Home Screen**.
+Launch the Manga Manager icon and sign in with your usual web account.
+
+The installed app uses the same dashboard, tools and login as the website.
+It includes a friendly offline screen; viewing library data and processing files
+requires a connection. Only public style sheets, app icons, the install script
+and the offline screen are cached. Account pages, manga covers and API responses
+are never saved by the service worker, and offline writes are never queued.
+The worker refreshes automatically when a new version is deployed.
+
+HTTPS is required on real devices; a plain HTTP LAN IP does not support service
+workers or normal PWA installation. Localhost works for development.
+Keep your existing reverse-proxy and login configuration. PWA support does not
+require an Android APK, device token, or new server component.
+

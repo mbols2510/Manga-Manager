@@ -1,0 +1,7 @@
+{% if has_endpoint('manifest') %}
+<link rel="manifest" href="{{ url_for('manifest') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-180.png') }}">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<script defer src="{{ url_for('static', filename='pwa.js') }}" data-worker="{{ url_for('service_worker') }}" data-scope="{{ url_for('index') }}"></script>
+{% endif %}
