@@ -1,0 +1,70 @@
+name: Publish requested 3.2.1 release
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/publish-3.2.1.yml']
+permissions:
+  contents: write
+  packages: write
+concurrency:
+  group: requested-release-3.2.1
+  cancel-in-progress: false
+env:
+  SOURCE_SHA: 58434eb168066ff5ed54fed679f09fdae572fbf0
+  IMAGE: ghcr.io/mbols2510/manga-manager
+jobs:
+  release:
+    if: github.repository == 'mbols2510/Manga-Manager' && github.event.before == '58434eb168066ff5ed54fed679f09fdae572fbf0'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - name: Require successful CI for the exact release source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          python3 - <<'PY'
+          import json, os, urllib.request
+          url = 'https://api.github.com/repos/' + os.environ['GH_REPO'] + '/actions/runs?per_page=100&head_sha=' + os.environ['SOURCE_SHA']
+          req = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + os.environ['GH_TOKEN'], 'Accept': 'application/vnd.github+json'})
+          with urllib.request.urlopen(req) as res:
+              runs = json.load(res)['workflow_runs']
+          assert any(r['name'] == 'CI' and r['head_sha'] == os.environ['SOURCE_SHA'] and r['conclusion'] == 'success' for r in runs), 'Release source has not passed CI'
+          from manga_manager import __version__
+          assert __version__ == '3.2.1'
+          PY
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:3.2.1
+            ${{ env.IMAGE }}:3.2
+            ${{ env.IMAGE }}:latest
+          labels: |
+            org.opencontainers.image.version=3.2.1
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
+            org.opencontainers.image.source=https://github.com/mbols2510/Manga-Manager
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Verify published image
+        run: |
+          docker buildx imagetools inspect "$IMAGE:3.2.1"
+          test "$(docker run --rm "$IMAGE:3.2.1" --version)" = '3.2.1'
+      - name: Publish release from the tested source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release create v3.2.1 --repo "$GH_REPO" --target "$SOURCE_SHA" --title "Manga Manager 3.2.1" --notes-file docs/releases/3.2.1.md --latest
