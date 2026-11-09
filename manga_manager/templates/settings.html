@@ -2,7 +2,6 @@
 {% block actions %}
 <button class="btn sm" id="save" type="button">Save settings</button>
 {% endblock %}
-{% block head %}<link rel="stylesheet" href="{{ url_for('static', filename='devices.css') }}">{% endblock %}
 {% block content %}
 <p class="pill bad" id="paused" role="status" hidden></p>
 <section class="card" aria-labelledby="conn-h">
@@ -19,35 +18,11 @@
   <p class="hint" id="db" style="color:var(--ink-soft)"></p>
   <p class="hint" style="color:var(--ink-soft)">Set with <code>DATABASE_URL</code> in <code>.env</code>; it can’t be changed here.</p>
 </section>
-<section class="card" aria-labelledby="devices-h">
-  <h2 id="devices-h">Devices</h2>
-  <p class="hint" style="color:var(--ink-soft)">Pair the Android companion app. Each device gets its own access token that you can revoke here at any time.</p>
-  <div id="dev-off" class="dev-msg error" role="status" hidden></div>
-  <form id="dev-form" class="dev-form" autocomplete="off">
-    <div class="field"><label for="dev-name">Device name</label>
-      <input type="text" id="dev-name" maxlength="64" required placeholder="Pixel 8"></div>
-    <button class="btn sm sig" id="dev-create" type="submit">Create device</button>
-  </form>
-  <p id="dev-status" class="dev-msg" role="status" aria-live="polite"></p>
-  <div id="dev-pair" class="dev-pair" hidden>
-    <p id="dev-url-warn" class="dev-url-warn" role="alert" hidden></p>
-    <p class="dev-warn"><strong>Shown only once.</strong> The code and QR below contain this device&rsquo;s access token. Anyone who has them can read your updates. Don&rsquo;t share or post them.</p>
-    <div class="dev-pair-body">
-      <div id="dev-qr" class="dev-qr" role="img" aria-label="QR code with the pairing code"></div>
-      <div class="field"><label for="dev-code">Pairing code</label>
-        <input type="text" id="dev-code" readonly spellcheck="false">
-        <div class="row"><button class="btn sm" id="dev-copy" type="button">Copy</button>
-          <button class="btn sm" id="dev-done" type="button">Done, hide it</button></div></div>
-    </div>
-  </div>
-  <div id="dev-list" aria-live="polite"></div>
-</section>
 <section class="card" aria-labelledby="jobs-h"><h2 id="jobs-h">Background jobs</h2><div id="jobs"></div></section>
 <div class="row" id="restart-row" hidden><span class="pill mid">Changes saved</span>
   <button class="btn sig" id="restart" type="button">Restart to apply</button></div>
 {% endblock %}
 {% block scripts %}
-<script src="{{ url_for('static', filename='devices.js') }}"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const api = (p, o) => fetch(p, o).then(r => r.json());

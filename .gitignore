@@ -10,17 +10,3 @@ postgres/
 docker-compose.override.yml
 compose.override.yaml
 _preview/
-
-# Android (android/)
-android/.gradle/
-android/.kotlin/
-android/**/build/
-android/.idea/
-android/captures/
-local.properties
-*.keystore
-*.jks
-*.apk
-*.aab
-# data/ above is the server's runtime folder; Kotlin packages named data are source.
-!android/app/src/**/data/
