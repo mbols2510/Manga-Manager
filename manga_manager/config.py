@@ -79,6 +79,10 @@ class Config:
     align_series_name: bool = True
     new_series_timeout: int = 300
     scan_delay: int = 60
+    scan_bulk_enabled: bool = False     # #7: one library scan instead of many series scans
+    scan_bulk_threshold: int = 5        # more distinct series than this in a library -> library scan
+    scan_poll_interval: int = 15        # seconds between "is Kavita still scanning?" checks
+    scan_wait_timeout: int = 1800       # give up waiting for Kavita to be free after this many seconds
     # libraries
     libraries: list[LibraryConfig] = field(default_factory=list)
     # manual title mapping: Suwayomi title -> Kavita series name
@@ -297,6 +301,10 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         new_series_timeout=int(kav.get("new_series_timeout", 300)),
         # scan_delay replaces series_scan_delay (2.0.0-2.0.2); the old name is still read.
         scan_delay=int(kav.get("scan_delay", kav.get("series_scan_delay", 60))),
+        scan_bulk_enabled=_as_bool(kav.get("scan_bulk_enabled"), False),
+        scan_bulk_threshold=int(kav.get("scan_bulk_threshold", 5)),
+        scan_poll_interval=int(kav.get("scan_poll_interval", 15)),
+        scan_wait_timeout=int(kav.get("scan_wait_timeout", 1800)),
         libraries=libraries,
         aliases={str(k): str(v) for k, v in aliases.items()},
         covers_enabled=_as_bool(cov.get("enabled"), True),
@@ -357,6 +365,12 @@ def validate(cfg: Config) -> None:
         problems.append("each library must have a unique kavita_library_id")
     if cfg.scan_delay < 0:
         problems.append("kavita.scan_delay can't be negative")
+    if cfg.scan_bulk_threshold < 0:
+        problems.append("kavita.scan_bulk_threshold can't be negative")
+    if cfg.scan_poll_interval < 1:
+        problems.append("kavita.scan_poll_interval must be at least 1")
+    if cfg.scan_wait_timeout < 0:
+        problems.append("kavita.scan_wait_timeout can't be negative")
     if cfg.web_keep_days < 0:
         problems.append("web.keep_days can't be negative (0 keeps every update)")
     if cfg.ntfy_delay_seconds < 0:

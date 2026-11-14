@@ -35,6 +35,13 @@ kavita:
   new_series_timeout: 300                            # seconds to wait for a new series to appear after a library scan
   scan_delay: 60                                     # seconds between two scan requests to Kavita
                                                      # (library and series scans); 0 = no pause
+  scan_bulk_enabled: false                           # many updated series in one library: send ONE library scan
+                                                     # instead of a scan per series (off = scan each series)
+  scan_bulk_threshold: 5                             # a library scan replaces the series scans once MORE than this
+                                                     # many different series were updated in that library in one run
+  scan_poll_interval: 15                             # seconds between checks whether Kavita is still scanning;
+                                                     # every scan waits until Kavita is free (admin API key needed)
+  scan_wait_timeout: 1800                            # stop waiting after this many seconds and scan anyway
 
 # Suwayomi category -> Kavita library. The category is matched as a prefix, case-insensitive
 # (so "Regular" also matches "Regular - Weekly"), like the v1 script did.

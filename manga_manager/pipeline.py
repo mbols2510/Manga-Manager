@@ -14,6 +14,7 @@ from .config import Config, LibraryConfig
 from .covers import CoverStore
 from .history import History
 from .kavita import KavitaClient, KavitaIndex, KavitaSeries
+from .kavita_scans import ScanCoordinator
 from .notifier import Notifier
 from . import preferred
 from .suwayomi import ActiveDownloads, SuwayomiClient, SuwayomiIndex, SuwayomiManga
@@ -88,7 +89,7 @@ class Pipeline:
                 result.errors.append(f"{manga_dir.name}: {exc}")
 
         if result.processed:
-            self._trigger_scans(result.processed)
+            self._trigger_scans(result.processed, kavita_index)
             kavita_index = self._wait_for_new_series(result.processed, kavita_index)
             self._notify(result.processed)
 
@@ -480,46 +481,31 @@ class Pipeline:
             log.debug("Could not remove %s: %s", manga_dir, exc)
 
     # ------------------------------------------------------------ kavita
-    def _trigger_scans(self, processed: list[Processed]) -> None:
-        """Ask Kavita to import the moved chapters, one scan request at a time.
+    def _trigger_scans(self, processed: list[Processed], kavita_index: KavitaIndex | None = None) -> None:
+        """Ask Kavita to import the moved chapters (#7).
 
-        Kavita misbehaves when several scans start at once, so every request waits
-        kavita.scan_delay seconds after the previous one (no wait after the last).
+        Requests are collected in a ScanCoordinator and sent one at a time, each only once Kavita
+        is not busy with another scan. New series need a library scan, which also covers the
+        other updated series of that library; optionally (kavita.scan_bulk_enabled) so does a
+        library with more than kavita.scan_bulk_threshold updated series.
         """
-        library_scans = sorted({p.library.kavita_library_id for p in processed if p.is_new})
-        scans: list[tuple[str, Callable[[], None]]] = [
-            (f"library {lib_id} (new series)", lambda lib_id=lib_id: self.kavita.scan_library(lib_id))
-            for lib_id in library_scans
-        ]
-        seen = set()
+        sizes: dict[int, int] = {}
+        for s in (kavita_index.series if kavita_index else []):
+            sizes[s.library_id] = sizes.get(s.library_id, 0) + 1
+        coord = ScanCoordinator(
+            self.kavita, sleep=self.sleep, scan_delay=self.cfg.scan_delay,
+            bulk_enabled=self.cfg.scan_bulk_enabled, bulk_threshold=self.cfg.scan_bulk_threshold,
+            library_sizes=sizes, poll_interval=self.cfg.scan_poll_interval,
+            wait_timeout=self.cfg.scan_wait_timeout, dry_run=self.cfg.dry_run)
+        for p in processed:
+            if p.is_new:
+                coord.request_library(p.library.kavita_library_id, "new series")
         for p in processed:
             s = p.kavita_series
-            if p.is_new or s is None or s.id in seen:
+            if p.is_new or s is None:
                 continue
-            seen.add(s.id)
-            if s.library_id in library_scans:
-                log.debug("%s is covered by the library %s scan", p.title, s.library_id)
-                continue
-            scans.append((f"series {s.id} ({p.title})",
-                          lambda s=s: self.kavita.scan_series(s.library_id, s.id)))
-
-        if self.cfg.dry_run:
-            for what, _ in scans:
-                log.info("[dry-run] would scan Kavita %s", what)
-            return
-
-        delay = self.cfg.scan_delay
-        if len(scans) > 1 and delay:
-            log.info("Starting %d Kavita scans, %ss apart (about %d min)", len(scans), delay,
-                     round((len(scans) - 1) * delay / 60))
-        for i, (what, start) in enumerate(scans):
-            if i and delay:
-                self.sleep(delay)
-            log.info("Scanning Kavita %s", what)
-            try:
-                start()
-            except Exception as exc:  # one failed scan shouldn't stop the others
-                log.warning("Kavita scan of %s failed: %s", what, exc)
+            coord.request_series(s.library_id, s.id, p.title)
+        coord.flush()
 
     def _wait_for_new_series(self, processed: list[Processed], index: KavitaIndex) -> KavitaIndex:
         pending = [p for p in processed if p.is_new]
