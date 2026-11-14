@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import threading
+import time
 from pathlib import Path
 
 log = logging.getLogger(__name__)
@@ -213,9 +214,12 @@ class BulkProcessor:
                 finally:
                     self.result["done"] += 1
             self.result["phase"] = "Rescanning Kavita"
-            for sid, batch in affected.items():
+            delay = getattr(self.tool.ctx.cfg, "scan_delay", 0)
+            for i, (sid, batch) in enumerate(affected.items()):
+                if i and delay:
+                    time.sleep(delay)  # one scan at a time, spaced like the Move Manga scan queue
                 try:
-                    if not self.tool.client.scan_series(sid, batch["libraryId"]):
+                    if not self.tool.scan_series(sid, batch["libraryId"]):
                         raise RuntimeError("Kavita did not accept the rescan")
                     self.tool.reconcile_read_status(sid, batch["chapters"])
                 except Exception as exc:

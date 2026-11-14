@@ -112,6 +112,9 @@ and is retried the same way (the wait is logged once, then once a minute). After
 series or library requested twice is scanned once. A library scan replaces the series scans of that
 library, because it covers them. Libraries are handled smallest first (by series count).
 
+The Double Chapters tab uses the same busy check and timings for its rescans: bulk apply scans one series
+at a time (`kavita.scan_delay` apart), web requests wait at most 30 s.
+
 **Bulk library scans** (`kavita.scan_bulk_enabled`, off by default): when MORE than
 `kavita.scan_bulk_threshold` (5) different series were updated in one library during a run, a single
 library scan is sent instead of one scan per series. A series counts once however many chapters

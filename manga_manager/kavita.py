@@ -18,6 +18,53 @@ class KavitaError(Exception):
     pass
 
 
+class ScanStateMixin:
+    """is_scan_busy() for any client that has `_request(method, path, **kw) -> Response`.
+
+    Shared by this client and the Double Chapters tool's own client, so both ask Kavita the same way.
+    """
+
+    _scan_error: type[Exception] = KavitaError
+    _activity_supported: bool | None = None
+
+    def _scan_check(self, resp, what: str):
+        if not resp.ok:
+            raise self._scan_error(f"Kavita {what} failed: HTTP {resp.status_code} {resp.text[:300]}")
+        return resp
+
+    SCAN_TASKS = ("ScanSeries", "ScanLibrary", "ScanLibraries", "ScanFolder")
+
+    def is_scan_busy(self) -> bool:
+        """True while Kavita runs (or has queued) a scan. Raises KavitaError when that can't be told.
+
+        /api/Server/activity (dev versions) also lists delayed scans; it is used when present and
+        skipped for good after a 404. /api/Server/is-task-running only knows running/queued
+        tasks, so False there does not prove that delayed scans are done. Needs an admin user.
+        """
+        busy = False
+        if self._activity_supported is not False:
+            resp = self._request("GET", "/api/Server/activity")
+            if resp.status_code == 404:
+                self._activity_supported = False
+            else:
+                self._scan_check(resp, "reading scan activity")
+                self._activity_supported = True
+                body = resp.json()
+                if isinstance(body, dict):
+                    busy = any(isinstance(v, list) and v for v in body.values())
+                else:
+                    busy = bool(body)
+                if busy:
+                    return True
+        for task in self.SCAN_TASKS:
+            resp = self._scan_check(
+                self._request("GET", "/api/Server/is-task-running", params={"methodName": task, "queue": "scan"}),
+                f"checking {task}")
+            if resp.json() is True:
+                return True
+        return busy
+
+
 @dataclass
 class KavitaSeries:
     id: int
@@ -49,7 +96,7 @@ class KavitaSeries:
         )
 
 
-class KavitaClient:
+class KavitaClient(ScanStateMixin):
     def __init__(self, base_url: str, api_key: str, plugin_name: str = "MoveManga", timeout: int = 60):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -154,38 +201,6 @@ class KavitaClient:
                           json={"seriesId": series_id, "volumeIds": [], "chapterIds": [chapter_id]}),
             f"marking chapter {chapter_id} read",
         )
-
-    SCAN_TASKS = ("ScanSeries", "ScanLibrary", "ScanLibraries", "ScanFolder")
-
-    def is_scan_busy(self) -> bool:
-        """True while Kavita runs (or has queued) a scan. Raises KavitaError when that can't be told.
-
-        /api/Server/activity (dev versions) also lists delayed scans; it is used when present and
-        skipped for good after a 404. /api/Server/is-task-running only knows running/queued
-        tasks, so False there does not prove that delayed scans are done. Needs an admin user.
-        """
-        busy = False
-        if self._activity_supported is not False:
-            resp = self._request("GET", "/api/Server/activity")
-            if resp.status_code == 404:
-                self._activity_supported = False
-            else:
-                self._check(resp, "reading scan activity")
-                self._activity_supported = True
-                body = resp.json()
-                if isinstance(body, dict):
-                    busy = any(isinstance(v, list) and v for v in body.values())
-                else:
-                    busy = bool(body)
-                if busy:
-                    return True
-        for task in self.SCAN_TASKS:
-            resp = self._check(
-                self._request("GET", "/api/Server/is-task-running", params={"methodName": task, "queue": "scan"}),
-                f"checking {task}")
-            if resp.json() is True:
-                return True
-        return busy
 
     # -- covers --------------------------------------------------------------
     def upload_series_cover(self, series_id: int, png_bytes: bytes, lock: bool = True) -> str:
