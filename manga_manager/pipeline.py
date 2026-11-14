@@ -437,14 +437,25 @@ class Pipeline:
                            if f.is_file() and f.suffix.lower() in self.cfg.extensions) if source.is_dir() else []
             labels = {f: chapter_label(f) for f in files}
             replaced, _ = self._existing_chapters(labels, target)
+            # An official / uncensored title replaces the same chapter of a lower-ranked source already in the
+            # series, like a normal run does (preferred.py); otherwise "Move chapters" would add duplicates.
+            rank = self.cfg.source_rank(suwayomi_title)
+            plan = preferred.make_plan(self.cfg, self.history, labels, target, rank)
+            replaced = sorted({*replaced, *plan.replaced_labels}, key=chapter_sort_key)
             if files or ids:
                 out["moves"].append({"from": source.name, "to": target.name, "files": len(files),
                                      "replaced": len(replaced)})
             if not apply:
                 continue
+            if plan.replace or plan.drop:
+                files = self._apply_plan(plan, files, series, library, target, suwayomi_title)
+                labels = {f: labels[f] for f in files}
             if files:
                 log.info("Reprocessing alias %r: %d file(s) %s -> %s", suwayomi_title, len(files), source, target)
                 self._move_files(files, target)
+                if not self.cfg.dry_run:
+                    self.history.record_sources(str(target), [(f.name, chapter_key(labels[f]), rank, None)
+                                                              for f in files])
                 if self.cfg.align_series_name:
                     self._align_series_name(files, target, series.name)
                 self._remove_leftover_cover(source)
@@ -461,9 +472,11 @@ class Pipeline:
             if moved and not self.cfg.dry_run:
                 try:
                     self.kavita.scan_library(library.kavita_library_id)
+                    self._restore_progress()                 # read progress of the replaced chapters
                 except Exception as exc:
                     log.warning("Kavita scan after reprocessing %r failed: %s", suwayomi_title, exc)
                     out["message"] += " The Kavita scan failed, so scan the library there."
+            self._carry = []                                 # never leak into the next run
         else:
             out["message"] = f"{moved} chapter file(s) would move into “{series.name}”."
         return out

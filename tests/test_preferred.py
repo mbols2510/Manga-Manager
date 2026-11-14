@@ -128,3 +128,34 @@ def test_alias_api_stores_and_validates_source_type(env):
     assert bad.status_code == 400
     html = c.get("/").data.decode()
     assert 'id="alias-rank"' in html and 'role="combobox"' in html and "api/aliases/preferred-preview" in html
+
+
+def test_move_chapters_into_the_alias_series_replaces_the_lower_ranked_chapter(env):
+    """Setting an alias on an official title and moving its chapters into the series must replace the same
+    chapter from the old source, not leave both for the Doubles tab."""
+    cfg, libs, _ = env
+    series_dir = libs["Regular"] / "Kavita Series"
+    own_dir = libs["Regular"] / "Series (Official)"
+    make_cbz(series_dir / "Old Group Chapter 5.cbz", "Kavita Series", "5")
+    make_cbz(series_dir / "Old Group Chapter 4.cbz", "Kavita Series", "4")
+    make_cbz(own_dir / "Chapter 5.cbz", "Series (Official)", "5")
+    make_cbz(own_dir / "Chapter 6.cbz", "Series (Official)", "6")
+    history = History(shared_db())
+    history.set_alias("Series (Official)", "Kavita Series", rank=1)
+    kavita = FakeKavita([KavitaSeries(7, "Kavita Series", 1, True, str(series_dir))])
+    covers = CoverStore(cfg.thumbnail_cache, cfg.suwayomi_thumbnails, FakeSuwayomi([]), None, False)
+    pipe = Pipeline(cfg, FakeSuwayomi([SuwayomiManga(1, "Series (Official)", ["Regular"], "Src")]), kavita,
+                    covers, history, FakeNotifier(), sleep=lambda s: None)
+
+    preview = pipe.reprocess_alias("Series (Official)")
+    assert preview["moves"][0]["replaced"] == 1 and (series_dir / "Old Group Chapter 5.cbz").exists()
+
+    out = pipe.reprocess_alias("Series (Official)", apply=True)
+
+    assert out["applied"]
+    assert sorted(f.name for f in series_dir.iterdir()) == ["Chapter 5.cbz", "Chapter 6.cbz", "Old Group Chapter 4.cbz"]
+    entry = next(iter(history.db.kv_get("dc", "trash", {}).values()))
+    assert entry["originalPath"].endswith("Old Group Chapter 5.cbz") and Path(entry["trashPath"]).exists()
+    ranks = history.source_ranks(str(series_dir))
+    assert ranks["Chapter 5.cbz"] == 1 and ranks["Chapter 6.cbz"] == 1
+    assert ("scan_library", 1) in kavita.calls
