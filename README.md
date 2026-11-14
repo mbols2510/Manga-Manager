@@ -57,6 +57,13 @@ source than what Kavita has is dropped the same way. If the preferred file has f
 files are kept and the chapter shows as a duplicate. **Preview** on an alias shows what the waiting downloads would replace.
 Chapters the official source doesn't have yet stay as they are. The switches are under **Settings → Preferred sources**.
 
+## The Aliases menu
+
+**Aliases** shows one card per manga with its cover (loaded lazily, and blurred or hidden like on the dashboard for
+categories in `web.blur_categories`). Each card has a badge: *Aliased*, *Matched by name* (Kavita has a series with the
+same name), *Missing Kavita source* (pending, see below) or *No alias*. The tabs **All / Missing alias / Missing Kavita
+source / Done** show how many manga are in each state, and the search box filters by title, Kavita name or library.
+
 ## Official library aliases
 
 Manga in the Suwayomi category named by `suwayomi.official_library` (default `ADULT_OFFICIAL`, env

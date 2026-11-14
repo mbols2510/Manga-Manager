@@ -387,16 +387,17 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
     @app.get("/api/aliases/suggestions")
     def alias_suggestions():
         if titles is None:
-            return jsonify({"suwayomi": [], "kavita": []})
+            return jsonify({"suwayomi": [], "kavita": [], "manga": []})
         with suggestions_lock:
             if suggestions["data"] is None or time.monotonic() - suggestions["at"] > SUGGESTIONS_TTL:
                 try:
                     data = titles()
                     suggestions.update(at=time.monotonic(), data={
-                        k: sorted(set(data.get(k) or []), key=str.casefold) for k in ("suwayomi", "kavita")})
+                        **{k: sorted(set(data.get(k) or []), key=str.casefold) for k in ("suwayomi", "kavita")},
+                        "manga": sorted(data.get("manga") or [], key=lambda m: m["title"].casefold())})
                 except Exception as exc:  # the form still works with typed names
                     log.warning("Could not load title suggestions for the alias form: %s", exc)
-                    return jsonify({"suwayomi": [], "kavita": [], "error": str(exc)})
+                    return jsonify({"suwayomi": [], "kavita": [], "manga": [], "error": str(exc)})
             return jsonify(suggestions["data"])
 
     @app.get("/api/status")

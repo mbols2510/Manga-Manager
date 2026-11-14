@@ -120,7 +120,7 @@ Only libraries listed in the config are touched; other Kavita libraries (4, 5, 6
 | `GET /api/aliases` | every alias (`source`: `dashboard` or `config`; `overridden` when a dashboard alias replaces a config one) and `can_edit` |
 | `POST /api/aliases` | add or change an alias: `{"suwayomi_title", "kavita_name", "previous"?}` (403 for accounts not in `config.yml` when the login is on) |
 | `POST /api/aliases/delete` | delete a dashboard alias: `{"suwayomi_title"}` |
-| `GET /api/aliases/suggestions` | Suwayomi titles and Kavita series names for the alias form (cached 10 minutes) |
+| `GET /api/aliases/suggestions` | Suwayomi titles and Kavita series names for the alias form, plus `manga` (`title`, Suwayomi `id` for the cover, `category`) for the cover cards (cached 10 minutes) |
 | `GET /frame/<category>/<n>` | the category's n-th frame (`/frame/<category>` is the first) |
 | `GET /thumb/<suwayomi id>.png` | cached cover (`?s=<signature>` opens it without a login) |
 | `GET/POST /login`, `GET/POST /signup`, `POST /logout` | dashboard login (when `web.auth.enabled`) |

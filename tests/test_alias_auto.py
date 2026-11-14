@@ -1,6 +1,7 @@
 """#8: manga in the ADULT_OFFICIAL category are added to the aliases with an empty Kavita source,
 and nothing is moved for them until the Kavita source is filled in."""
 import logging
+from pathlib import Path
 
 from manga_manager.config import Config, LibraryConfig, load_config
 from manga_manager.covers import CoverStore
@@ -153,3 +154,43 @@ def test_reprocess_explains_pending_alias(env):
     pipe, _ = pipe_for(cfg, MANGAS, FakeHistory({"Alpha": ""}))
     out = pipe.reprocess_alias("Alpha")
     assert "Kavita source" in out["message"] and not out["moves"]
+
+
+# ---------------------------------------------------------------- #9: alias menu data and page
+def test_title_lists_carry_cover_id_and_category_for_the_alias_cards(env):
+    from manga_manager.__main__ import title_lists
+    cfg, libs, _ = env
+    cfg.libraries = [LibraryConfig("ADULT_OFFICIAL", 2, libs["Adult"], "Adult"), *cfg.libraries]
+
+    class Kav:
+        def all_series(self):
+            return [KavitaSeries(9, "Kav A", 2, True, "/m/a")]
+
+    data = title_lists(cfg, FakeSuwayomi(MANGAS), Kav())()
+    assert data["suwayomi"][:2] == ["Alpha", "Beta"] and data["kavita"] == ["Kav A"]
+    by_title = {m["title"]: m for m in data["manga"]}
+    assert by_title["Alpha"] == {"title": "Alpha", "id": 1, "category": "Adult"}
+    assert by_title["Beta"]["category"] == "Regular" and by_title["Delta"]["category"] == ""
+
+
+def test_suggestions_endpoint_passes_the_manga_list_through(env):
+    from manga_manager.web import create_app
+    cfg, *_ = env
+    manga = [{"title": "Alpha", "id": 1, "category": "Adult"}]
+    covers = CoverStore(cfg.thumbnail_cache, cfg.suwayomi_thumbnails, None)
+    client = create_app(cfg, FakeHistory(), covers, None,
+                        titles=lambda: {"suwayomi": ["Alpha"], "kavita": [], "manga": manga}).test_client()
+    assert client.get("/api/aliases/suggestions").get_json()["manga"] == manga
+
+
+def test_alias_menu_page_has_cover_cards_filters_and_search(env):
+    from manga_manager.web import create_app
+    cfg, *_ = env
+    covers = CoverStore(cfg.thumbnail_cache, cfg.suwayomi_thumbnails, None)
+    html = create_app(cfg, FakeHistory(), covers, None).test_client().get("/").get_data(as_text=True)
+    for needle in ('id="alias-search"', 'id="alias-tabs"', 'data-filter="all"', 'data-filter="missing-alias"',
+                   'data-filter="missing-source"', 'data-filter="done"', 'class="alias-grid"',
+                   "data-cover-src", "BLUR.includes", "status-badge"):
+        assert needle in html, needle
+    css = (Path(__file__).parent.parent / "manga_manager" / "static" / "app.css").read_text(encoding="utf-8")
+    assert ".alias-grid" in css and ".status-badge" in css and "auto-fill" in css.split(".alias-grid", 1)[1][:200]
