@@ -22,6 +22,7 @@ class Carry:
     new_name: str        # file name of the incoming chapter
     pages_read: int      # read progress of the replaced chapter
     old_pages: int       # its page count
+    overwrite: bool = False   # same file name: Kavita lists the old chapter until its rescan changes the page count
 
 
 def _names(chapter: dict) -> set[str]:
@@ -110,6 +111,8 @@ def restore(kavita, carries: list[Carry], sleep, attempts: int = POLL_ATTEMPTS, 
             new_pages = int((chapter or {}).get("pages") or 0)
             if not chapter or new_pages <= 0:
                 continue  # not scanned yet
+            if c.overwrite and new_pages == c.old_pages:
+                continue  # still the old file's entry: Kavita has not rescanned it yet
             pending.remove(c)
             page = target_page(c.pages_read, c.old_pages, new_pages)
             current = int(chapter.get("pagesRead") or 0)
@@ -125,5 +128,8 @@ def restore(kavita, carries: list[Carry], sleep, attempts: int = POLL_ATTEMPTS, 
             except Exception as exc:  # noqa: BLE001
                 log.warning("Could not carry read progress over to %s: %s", c.new_name, exc)
     for c in pending:
-        log.warning("Kavita has not picked up %s yet; its read progress was not carried over", c.new_name)
+        if c.overwrite:
+            log.info("Kavita still lists %s with the old page count; its read progress was not carried over", c.new_name)
+        else:
+            log.warning("Kavita has not picked up %s yet; its read progress was not carried over", c.new_name)
     return done

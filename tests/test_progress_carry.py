@@ -163,3 +163,56 @@ def test_restore_without_carries_does_not_touch_kavita():
         def is_scan_busy(self):
             raise AssertionError("not needed")
     assert progress.restore(K(), [], lambda s: None) == 0
+
+
+# ---------------------------------------------------------------- same file name: overwritten in place
+class OverwriteKavita(ProgressKavita):
+    """The new file has the same name, so Kavita keeps the chapter and its old pagesRead after the rescan."""
+
+    def __init__(self, series, old_pages, old_read, new_pages):
+        super().__init__(series, "Chapter 5.cbz", old_pages, old_read, "Chapter 5.cbz", new_pages)
+        self.new = {**self.chapters[0], "pages": new_pages}      # same id, new page count, stale pagesRead
+
+
+def run_overwrite(env, old_pages, old_read, new_pages):
+    cfg, libs, _ = env
+    series_dir = libs["Regular"] / "Series"
+    make_cbz(series_dir / "Chapter 5.cbz", "Series", "5")
+    make_cbz(cfg.downloads / "Src (EN)" / "Series (Official)" / "Chapter 5.cbz", "Series (Official)", "5")
+    kavita = OverwriteKavita([KavitaSeries(7, "Series", 1, False, str(series_dir))], old_pages, old_read, new_pages)
+    suwa = FakeSuwayomi([SuwayomiManga(1, "Series (Official)", ["Regular"], "Src")])
+    covers = CoverStore(cfg.thumbnail_cache, cfg.suwayomi_thumbnails, suwa, None, False)
+    Pipeline(cfg, suwa, kavita, covers, History(shared_db()), FakeNotifier(), sleep=lambda s: None).run()
+    return kavita
+
+
+def test_overwritten_fully_read_chapter_stays_fully_read(env):
+    assert run_overwrite(env, 20, 20, 40).writes == [("read", 11)]       # not left at 20 of 40 pages
+
+
+def test_overwritten_partial_progress_is_scaled(env):
+    assert run_overwrite(env, 20, 10, 30).writes == [("progress", 11, 15)]
+
+
+def test_overwrite_with_the_same_page_count_changes_nothing(env):
+    assert run_overwrite(env, 1, 1, 1).writes == []
+
+
+def test_restore_ignores_the_stale_entry_until_the_page_count_changes():
+    stale = {"id": 11, "volumeId": 3, "pages": 20, "pagesRead": 20, "files": [{"filePath": "/m/Chapter 5.cbz"}]}
+    fresh = {**stale, "pages": 40}
+
+    class K:
+        calls = 0
+        writes = []
+
+        def series_chapters(self, sid):
+            self.calls += 1
+            return [stale] if self.calls < 3 else [fresh]
+
+        def mark_chapter_read(self, sid, cid):
+            self.writes.append(("read", cid))
+
+    k = K()
+    c = progress.Carry(1, 7, "Chapter 5.cbz", 20, 20, overwrite=True)
+    assert progress.restore(k, [c], lambda s: None) == 1 and k.writes == [("read", 11)] and k.calls == 3

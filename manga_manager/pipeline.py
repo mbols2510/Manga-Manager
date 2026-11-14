@@ -293,6 +293,7 @@ class Pipeline:
                  "existing" if existing else "new", len(files),
                  f", {len(replaced)} replacing existing" if replaced else "",
                  f", {len(duplicates)} duplicate(s) of existing chapters" if duplicates else "")
+        self._carry_overwritten(files, destination, existing, library)
         self._move_files(files, destination)
         if not self.cfg.dry_run:
             self.history.record_sources(str(destination), [(f.name, chapter_key(labels[f]), rank, suwa.id) for f in files])
@@ -346,6 +347,23 @@ class Pipeline:
                                "lower-ranked source, a better file exists")
             log.info("Dropped %s: %s is from a higher-ranked source", incoming.name, old.name)
         return [f for f in files if f not in plan.dropped]
+
+    def _carry_overwritten(self, files: list[Path], destination: Path, existing: KavitaSeries | None,
+                           library: LibraryConfig) -> None:
+        """Remember the read progress of chapters that a file with the same name overwrites in place.
+
+        Kavita keeps the old pages-read count when the file is replaced, so a fully read chapter whose new
+        file has more pages shows as half read. _restore_progress sets it right after the rescan. Nothing is
+        carried when the page count is unchanged, or when the series is new to Kavita."""
+        if self.cfg.dry_run or existing is None:
+            return
+        pages = {f.name: preferred.count_pages(f) for f in files if (destination / f.name).is_file()}
+        if not pages:
+            return
+        carries = progress.snapshot(self.kavita, library.kavita_library_id, existing.id, [(n, n) for n in pages])
+        for c in carries:
+            c.overwrite = True
+        self._carry += [c for c in carries if not (c.old_pages and pages.get(c.new_name) == c.old_pages)]
 
     def _restore_progress(self) -> None:
         """Give chapters that replaced an older file the read progress of the old one (#6)."""
@@ -452,6 +470,7 @@ class Pipeline:
                 labels = {f: labels[f] for f in files}
             if files:
                 log.info("Reprocessing alias %r: %d file(s) %s -> %s", suwayomi_title, len(files), source, target)
+                self._carry_overwritten(files, target, series, library)
                 self._move_files(files, target)
                 if not self.cfg.dry_run:
                     self.history.record_sources(str(target), [(f.name, chapter_key(labels[f]), rank, None)
