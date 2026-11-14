@@ -87,7 +87,7 @@ def test_sync_adds_only_official_library_manga_with_empty_kavita_source(env, cap
 
 
 def test_sync_is_idempotent_and_keeps_existing_aliases(env):
-    cfg, _, _ = env
+    cfg, _, tmp = env
     history = FakeHistory({"Alpha": "Kavita Alpha"})
     cfg.aliases = {"Gamma": "Config Gamma"}
     pipe, _ = pipe_for(cfg, MANGAS, history)
@@ -95,7 +95,7 @@ def test_sync_is_idempotent_and_keeps_existing_aliases(env):
     assert pipe.sync_official_aliases(SuwayomiIndex(MANGAS)) == []
     assert history.aliases() == {"Alpha": "Kavita Alpha"} and history.auto_calls == []
     history2 = FakeHistory()
-    pipe2, _ = pipe_for(Config(), MANGAS, history2)
+    pipe2, _ = pipe_for(Config(data_dir=tmp / "data2", config_dir=tmp / "config2"), MANGAS, history2)
     assert pipe2.sync_official_aliases(SuwayomiIndex(MANGAS)) == ["Alpha", "Gamma"]
     assert pipe2.sync_official_aliases(SuwayomiIndex(MANGAS)) == []
     assert list(history2.aliases()) == ["Alpha", "Gamma"]
