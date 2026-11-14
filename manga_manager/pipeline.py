@@ -14,8 +14,9 @@ from .config import Config, LibraryConfig
 from .covers import CoverStore
 from .history import History
 from .kavita import KavitaClient, KavitaIndex, KavitaSeries
+from .kavita_scans import ScanCoordinator
 from .notifier import Notifier
-from . import preferred
+from . import preferred, progress
 from .suwayomi import ActiveDownloads, SuwayomiClient, SuwayomiIndex, SuwayomiManga
 
 log = logging.getLogger(__name__)
@@ -66,16 +67,22 @@ class Pipeline:
         self.history = history
         self.notifier = notifier
         self.sleep = sleep
+        self._carry: list[progress.Carry] = []   # read progress to hand to replacing chapters (#6)
 
     # ------------------------------------------------------------------ run
     def run(self) -> RunResult:
         result = RunResult()
+        self._carry = []
         self.refresh_aliases()
         self.prune_history()
         suwa_index = SuwayomiIndex(self.suwayomi.library())
         kavita_index = KavitaIndex(self.kavita.all_series())
         log.info("Loaded %d Suwayomi library entries and %d Kavita series",
                  len(suwa_index.mangas), len(kavita_index.series))
+        try:
+            self.sync_official_aliases(suwa_index)
+        except Exception as exc:  # never stop a run over this
+            log.warning("Could not add the official manga to the aliases: %s", exc)
         downloading = self._active_downloads()
 
         for manga_dir in self._manga_folders():
@@ -88,8 +95,9 @@ class Pipeline:
                 result.errors.append(f"{manga_dir.name}: {exc}")
 
         if result.processed:
-            self._trigger_scans(result.processed)
+            self._trigger_scans(result.processed, kavita_index)
             kavita_index = self._wait_for_new_series(result.processed, kavita_index)
+            self._restore_progress()
             self._notify(result.processed)
 
         if self.cfg.covers_enabled:
@@ -171,6 +179,33 @@ class Pipeline:
         except Exception as exc:  # never stop a run over this
             log.warning("Could not read the dashboard aliases: %s", exc)
 
+    def sync_official_aliases(self, suwa_index: SuwayomiIndex) -> list[str]:
+        """#8: add every manga of the official Suwayomi category to the aliases, Kavita source left empty.
+
+        The Kavita source has to be filled in by hand; until then nothing is moved for the manga.
+        Existing aliases (dashboard or config.yml) are never changed, so repeated runs add nothing new.
+        """
+        library = (self.cfg.official_library or "").strip()
+        if not library:
+            return []
+        added, seen = [], set()
+        for manga in suwa_index.mangas:
+            key = manga.title.casefold()
+            if key in seen or not manga.title.strip() or self.cfg.has_alias(manga.title):
+                continue
+            if not any(c.strip().casefold() == library.casefold() for c in manga.categories):
+                continue
+            seen.add(key)
+            if self.cfg.dry_run:
+                log.info("[dry-run] would add %r from %s to the aliases (Kavita source empty)", manga.title, library)
+            elif self.history.add_auto_alias(manga.title, rank=1):
+                added.append(manga.title)
+                log.info("Auto-added %r from %s to the aliases: set its Kavita source on the dashboard "
+                         "(nothing is moved until then)", manga.title, library)
+        if added:
+            self.refresh_aliases()
+        return added
+
     def prune_history(self) -> None:
         """Remove dashboard updates older than web.keep_days (#14)."""
         if self.cfg.dry_run or self.cfg.web_keep_days <= 0:
@@ -196,6 +231,12 @@ class Pipeline:
         if suwa is None:
             msg = f"{manga_dir.name}: not found in the Suwayomi library (ComicInfo series: {info.series!r})"
             log.warning(msg)
+            result.skipped.append(msg)
+            return None
+
+        if self.cfg.alias_pending(suwa.title):
+            msg = f"{suwa.title}: waiting for its Kavita source (set it under Aliases), nothing moved"
+            log.info(msg)
             result.skipped.append(msg)
             return None
 
@@ -287,6 +328,10 @@ class Pipeline:
             return [f for f in files if f not in plan.dropped]
         series_name = existing.name if existing else title
         series_id = existing.id if existing else None
+        if series_id is not None:
+            self._carry += progress.snapshot(self.kavita, library.kavita_library_id, series_id,
+                                             [(old.name, incoming.name) for incoming, old, _ in plan.replace
+                                              if old.exists()])
         gone = []
         for incoming, old, label in plan.replace:
             if old.exists():
@@ -301,6 +346,18 @@ class Pipeline:
                                "lower-ranked source, a better file exists")
             log.info("Dropped %s: %s is from a higher-ranked source", incoming.name, old.name)
         return [f for f in files if f not in plan.dropped]
+
+    def _restore_progress(self) -> None:
+        """Give chapters that replaced an older file the read progress of the old one (#6)."""
+        carries, self._carry = self._carry, []
+        if not carries or self.cfg.dry_run:
+            return
+        try:
+            n = progress.restore(self.kavita, carries, self.sleep)
+            if n:
+                log.info("Carried read progress over to %d replaced chapter(s)", n)
+        except Exception as exc:  # never stop a run over this
+            log.warning("Could not carry read progress over: %s", exc)
 
     def preview_preferred(self, suwayomi_title: str) -> dict:
         """What the preferred-source rules would do with the downloads of this title waiting in Suwayomi's folder."""
@@ -344,6 +401,9 @@ class Pipeline:
         self.refresh_aliases()
         kav_name = self.cfg.kavita_name_for(suwayomi_title)
         out = {"applied": False, "moves": [], "message": ""}
+        if self.cfg.alias_pending(suwayomi_title):
+            out["message"] = f"“{suwayomi_title}” is still waiting for its Kavita source. Set it first."
+            return out
         if not kav_name:
             out["message"] = f"There is no alias for “{suwayomi_title}”."
             return out
@@ -480,46 +540,31 @@ class Pipeline:
             log.debug("Could not remove %s: %s", manga_dir, exc)
 
     # ------------------------------------------------------------ kavita
-    def _trigger_scans(self, processed: list[Processed]) -> None:
-        """Ask Kavita to import the moved chapters, one scan request at a time.
+    def _trigger_scans(self, processed: list[Processed], kavita_index: KavitaIndex | None = None) -> None:
+        """Ask Kavita to import the moved chapters (#7).
 
-        Kavita misbehaves when several scans start at once, so every request waits
-        kavita.scan_delay seconds after the previous one (no wait after the last).
+        Requests are collected in a ScanCoordinator and sent one at a time, each only once Kavita
+        is not busy with another scan. New series need a library scan, which also covers the
+        other updated series of that library; optionally (kavita.scan_bulk_enabled) so does a
+        library with more than kavita.scan_bulk_threshold updated series.
         """
-        library_scans = sorted({p.library.kavita_library_id for p in processed if p.is_new})
-        scans: list[tuple[str, Callable[[], None]]] = [
-            (f"library {lib_id} (new series)", lambda lib_id=lib_id: self.kavita.scan_library(lib_id))
-            for lib_id in library_scans
-        ]
-        seen = set()
+        sizes: dict[int, int] = {}
+        for s in (kavita_index.series if kavita_index else []):
+            sizes[s.library_id] = sizes.get(s.library_id, 0) + 1
+        coord = ScanCoordinator(
+            self.kavita, sleep=self.sleep, scan_delay=self.cfg.scan_delay,
+            bulk_enabled=self.cfg.scan_bulk_enabled, bulk_threshold=self.cfg.scan_bulk_threshold,
+            library_sizes=sizes, poll_interval=self.cfg.scan_poll_interval,
+            wait_timeout=self.cfg.scan_wait_timeout, dry_run=self.cfg.dry_run)
+        for p in processed:
+            if p.is_new:
+                coord.request_library(p.library.kavita_library_id, "new series")
         for p in processed:
             s = p.kavita_series
-            if p.is_new or s is None or s.id in seen:
+            if p.is_new or s is None:
                 continue
-            seen.add(s.id)
-            if s.library_id in library_scans:
-                log.debug("%s is covered by the library %s scan", p.title, s.library_id)
-                continue
-            scans.append((f"series {s.id} ({p.title})",
-                          lambda s=s: self.kavita.scan_series(s.library_id, s.id)))
-
-        if self.cfg.dry_run:
-            for what, _ in scans:
-                log.info("[dry-run] would scan Kavita %s", what)
-            return
-
-        delay = self.cfg.scan_delay
-        if len(scans) > 1 and delay:
-            log.info("Starting %d Kavita scans, %ss apart (about %d min)", len(scans), delay,
-                     round((len(scans) - 1) * delay / 60))
-        for i, (what, start) in enumerate(scans):
-            if i and delay:
-                self.sleep(delay)
-            log.info("Scanning Kavita %s", what)
-            try:
-                start()
-            except Exception as exc:  # one failed scan shouldn't stop the others
-                log.warning("Kavita scan of %s failed: %s", what, exc)
+            coord.request_series(s.library_id, s.id, p.title)
+        coord.flush()
 
     def _wait_for_new_series(self, processed: list[Processed], index: KavitaIndex) -> KavitaIndex:
         pending = [p for p in processed if p.is_new]

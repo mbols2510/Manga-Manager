@@ -58,6 +58,7 @@ class KavitaClient:
         self.session = requests.Session()
         self._token: str | None = None
         self._upload_by_file_supported: bool | None = None
+        self._activity_supported: bool | None = None
 
     # -- auth / transport ----------------------------------------------------
     def authenticate(self) -> None:
@@ -125,6 +126,64 @@ class KavitaClient:
                           json={"libraryId": library_id, "seriesId": series_id, "forceUpdate": False}),
             f"scan of series {series_id}",
         )
+
+    # -- read progress -------------------------------------------------------
+    def series_chapters(self, series_id: int) -> list[dict]:
+        """Flat list of the series' chapters as Kavita reports them (id, volumeId, pages, pagesRead, files)."""
+        resp = self._check(self._request("GET", "/api/Series/volumes", params={"seriesId": series_id}),
+                           f"listing chapters of series {series_id}")
+        chapters = []
+        for vol in resp.json() or []:
+            for ch in vol.get("chapters") or []:
+                chapters.append({**ch, "volumeId": ch.get("volumeId", vol.get("id"))})
+        return chapters
+
+    def set_chapter_progress(self, library_id: int, series_id: int, volume_id: int, chapter_id: int,
+                             page: int) -> None:
+        self._check(
+            self._request("POST", "/api/Reader/progress",
+                          json={"libraryId": library_id, "seriesId": series_id, "volumeId": volume_id,
+                                "chapterId": chapter_id, "pageNum": page}),
+            f"saving progress of chapter {chapter_id}",
+        )
+
+    def mark_chapter_read(self, series_id: int, chapter_id: int) -> None:
+        self._check(
+            self._request("POST", "/api/reader/mark-chapter-read",
+                          params={"seriesId": series_id, "chapterId": chapter_id, "generateReadingSession": "false"},
+                          json={"seriesId": series_id, "chapterId": chapter_id}),
+            f"marking chapter {chapter_id} read",
+        )
+
+    SCAN_TASKS = ("ScanSeries", "ScanLibrary", "ScanLibraries", "ScanFolder")
+
+    def is_scan_busy(self) -> bool:
+        """True while Kavita runs (or has queued) a scan. Raises KavitaError when that can't be told.
+
+        /api/Server/activity (dev versions) also lists delayed scans; it is used when present and
+        skipped for good after a 404. /api/Server/is-task-running only knows running/queued
+        tasks, so False there does not prove that delayed scans are done. Needs an admin user.
+        """
+        busy = False
+        if self._activity_supported is not False:
+            resp = self._request("GET", "/api/Server/activity")
+            if resp.status_code == 404:
+                self._activity_supported = False
+            else:
+                self._check(resp, "reading scan activity")
+                self._activity_supported = True
+                body = resp.json()
+                if isinstance(body, dict):
+                    busy = any(isinstance(v, list) and v for v in body.values())
+                else:
+                    busy = bool(body)
+        for task in self.SCAN_TASKS:
+            resp = self._check(
+                self._request("GET", "/api/Server/is-task-running", params={"methodName": task, "queue": "scan"}),
+                f"checking {task}")
+            if resp.json() is True:
+                busy = True
+        return busy
 
     # -- covers --------------------------------------------------------------
     def upload_series_cover(self, series_id: int, png_bytes: bytes, lock: bool = True) -> str:

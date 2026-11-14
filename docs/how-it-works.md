@@ -42,6 +42,11 @@ removed (`(Official)`, `[Digital]`, `〘Official〙`, `【Mature】` …). That 
 it points to a single series, so it never guesses between two candidates. An alias is tried first:
 one added on the dashboard, else one from `aliases` in `config.yml`.
 
+At the start of every run, manga in the Suwayomi category `suwayomi.official_library` (default `ADULT_OFFICIAL`) get an
+alias with an **empty** Kavita source (source type official), unless they already have an alias. The run logs each
+one it adds. A manga whose alias has an empty Kavita source is skipped (reported as skipped) and its files stay in
+Suwayomi's folder until the Kavita series is filled in on the dashboard.
+
 New chapters are always moved into the folder Kavita already uses for the series, so a series is
 never split across two folders.
 
@@ -97,11 +102,22 @@ from `GET /api/v1/manga/<id>/thumbnail`. Every cover is converted to a real PNG 
 | `POST /api/Upload/series` `{id, fileName, lockCover}` | set the staged image as series cover |
 | `POST /api/Upload/series` `{id, url: <base64>, lockCover}` | fallback for Kavita < 0.9.1 |
 
-Scan requests are sent one at a time, `kavita.scan_delay` seconds apart (60 by default), because
-Kavita handles several simultaneous scans badly. Library scans go first. A series scan is skipped
-when its library already gets a library scan in the same run, since that scan covers it. If one
-request fails, the others are still sent. With many updated series a run takes longer (10 series ≈
-9 minutes); the next run is scheduled only after the current one ends, so runs never overlap.
+Scan requests are collected during a run and sent one at a time, `kavita.scan_delay` seconds apart
+(60 by default). Before each one Manga Manager waits until Kavita is not scanning: it checks
+`GET /api/Server/is-task-running?methodName=…&queue=scan` for `ScanSeries`, `ScanLibrary`,
+`ScanLibraries` and `ScanFolder` (needs an admin API key) and, on Kavita versions that have it,
+`GET /api/Server/activity`, which also lists delayed scans (a 404 there is ignored). While Kavita
+is busy it re-checks every `kavita.scan_poll_interval` seconds (15); an API error counts as "unknown"
+and is retried the same way. After `kavita.scan_wait_timeout` seconds (1800) it scans anyway. The same
+series or library requested twice is scanned once. A library scan replaces the series scans of that
+library, because it covers them. Libraries are handled smallest first (by series count).
+
+**Bulk library scans** (`kavita.scan_bulk_enabled`, off by default): when MORE than
+`kavita.scan_bulk_threshold` (5) different series were updated in one library during a run, a single
+library scan is sent instead of one scan per series. A series counts once however many chapters
+it got; exactly the threshold or fewer still get individual scans. Each library is judged separately,
+and only libraries with at least one updated series are scanned. If one request fails, the others are
+still sent; the next run is scheduled only after the current one ends, so runs never overlap.
 
 Only libraries listed in the config are touched; other Kavita libraries (4, 5, 6 in v1) are ignored.
 
@@ -115,7 +131,7 @@ Only libraries listed in the config are touched; other Kavita libraries (4, 5, 6
 | `GET /api/aliases` | every alias (`source`: `dashboard` or `config`; `overridden` when a dashboard alias replaces a config one) and `can_edit` |
 | `POST /api/aliases` | add or change an alias: `{"suwayomi_title", "kavita_name", "previous"?}` (403 for accounts not in `config.yml` when the login is on) |
 | `POST /api/aliases/delete` | delete a dashboard alias: `{"suwayomi_title"}` |
-| `GET /api/aliases/suggestions` | Suwayomi titles and Kavita series names for the alias form (cached 10 minutes) |
+| `GET /api/aliases/suggestions` | Suwayomi titles and Kavita series names for the alias form, plus `manga` (`title`, Suwayomi `id` for the cover, `category`) for the cover cards (cached 10 minutes) |
 | `GET /frame/<category>/<n>` | the category's n-th frame (`/frame/<category>` is the first) |
 | `GET /thumb/<suwayomi id>.png` | cached cover (`?s=<signature>` opens it without a login) |
 | `GET/POST /login`, `GET/POST /signup`, `POST /logout` | dashboard login (when `web.auth.enabled`) |

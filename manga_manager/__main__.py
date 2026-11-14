@@ -270,8 +270,15 @@ def title_lists(cfg: Config, suwayomi: SuwayomiClient, kavita: KavitaClient):
     """Names suggested in the dashboard's alias form (#12)."""
     def load() -> dict[str, list[str]]:
         libs = {l.kavita_library_id for l in cfg.libraries}
-        return {"suwayomi": [m.title for m in suwayomi.library()],
-                "kavita": [s.name for s in kavita.all_series() if s.library_id in libs]}
+        mangas = suwayomi.library()
+
+        def category(m) -> str:     # the library label shown on the dashboard, for the cover frame / blur rules (#9)
+            lib = cfg.library_for_category(m.categories)
+            return lib.label if lib else (m.categories[0] if m.categories else "")
+
+        return {"suwayomi": [m.title for m in mangas],
+                "kavita": [s.name for s in kavita.all_series() if s.library_id in libs],
+                "manga": [{"title": m.title, "id": m.id, "category": category(m)} for m in mangas]}
     return load
 
 

@@ -12,9 +12,15 @@ One self-hosted dashboard for a Suwayomi → Kavita manga setup. It replaces fou
 
 One container, one login, one PostgreSQL database.
 
-**3.2.2:** fixes the bulk preview's host/container path conflict, uses the existing
-chapter-card design with editable choices, and reduces cover-loading queues on
-both tabs. See [release notes](docs/releases/3.2.2.md). The 3.2.1 release restored
+**3.3.1:** hardens bulk duplicate cleanup (admin only, never keeps an empty or truncated
+copy, final confirmation) and makes image publishing wait for the tests. See
+[release notes](docs/releases/3.3.1.md).
+
+**3.3.0:** Kavita scans now wait for each other (with an optional library scan for
+bulk updates), official chapters keep your read progress when they replace a chapter,
+official manga from Suwayomi are added to the aliases automatically, and the alias
+menu shows cover cards with status filters. See [release notes](docs/releases/3.3.0.md).
+3.2.2 fixed the bulk preview's path conflict and cover-loading queues; 3.2.1 restored
 the 3.1.0 baseline, retired the Android app and introduced the PWA.
 
 ## Install
@@ -56,6 +62,21 @@ goes to the trash (restorable on the **Doubles** tab, deleted after the retentio
 source than what Kavita has is dropped the same way. If the preferred file has far fewer pages (default under 60%) both
 files are kept and the chapter shows as a duplicate. **Preview** on an alias shows what the waiting downloads would replace.
 Chapters the official source doesn't have yet stay as they are. The switches are under **Settings → Preferred sources**.
+
+## The Aliases menu
+
+**Aliases** shows one card per manga with its cover (loaded lazily, and blurred or hidden like on the dashboard for
+categories in `web.blur_categories`). Each card has a badge: *Aliased*, *Matched by name* (Kavita has a series with the
+same name), *Missing Kavita source* (pending, see below) or *No alias*. The tabs **All / Missing alias / Missing Kavita
+source / Done** show how many manga are in each state, and the search box filters by title, Kavita name or library.
+
+## Official library aliases
+
+Manga in the Suwayomi category named by `suwayomi.official_library` (default `ADULT_OFFICIAL`, env
+`SUWAYOMI_OFFICIAL_LIBRARY`, empty turns it off) are added to **Aliases** automatically on every run, as official
+sources. Their Kavita source is left **empty** and shown as *pending*: set the Kavita series by hand under **Aliases**.
+While it is empty, Manga Manager does not move that manga. Aliases that already exist are never changed, so nothing is
+added twice. Deleting a pending alias adds it again on the next run while the manga stays in that category.
 
 ## Discord cards (optional, next to ntfy)
 

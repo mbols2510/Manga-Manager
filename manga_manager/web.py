@@ -27,7 +27,9 @@ log = logging.getLogger(__name__)
 # Settings hold the connection secrets and paths, so only an administrator (a config.yml account or the
 # first account) may open or change them.
 ADMIN_ENDPOINTS = {"core.settings_page", "core.settings_get", "core.settings_save", "core.settings_restart",
-                   "core.test_notification"}
+                   "core.test_notification",
+                   # these move files to the Trash across the whole library
+                   "double_chapters.bulk_preview", "double_chapters.bulk_apply", "double_chapters.remediate"}
 PUBLIC_ENDPOINTS = {"login", "signup", "health", "core.health", "static", "manifest", "service_worker", "offline"}
 
 
@@ -105,10 +107,10 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         cfg.dashboard_aliases = dash
         cfg.dashboard_ranks = history.alias_ranks()
         mine = {k.casefold() for k in dash}
-        items = [{"suwayomi_title": k, "kavita_name": v, "source": "dashboard",
+        items = [{"suwayomi_title": k, "kavita_name": v, "source": "dashboard", "pending": not v.strip(),
                   "rank": cfg.dashboard_ranks.get(k.casefold(), 0), "rank_auto": detect_rank(k)} for k, v in dash.items()]
         items += [{"suwayomi_title": k, "kavita_name": v, "source": "config", "overridden": k.casefold() in mine,
-                   "rank": 0, "rank_auto": detect_rank(k)}
+                   "pending": not v.strip(), "rank": 0, "rank_auto": detect_rank(k)}
                   for k, v in cfg.aliases.items()]
         items.sort(key=lambda i: (i["suwayomi_title"].casefold(), i["source"] != "dashboard"))
         return {"items": items, "can_edit": can_edit_aliases()}
@@ -387,16 +389,17 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
     @app.get("/api/aliases/suggestions")
     def alias_suggestions():
         if titles is None:
-            return jsonify({"suwayomi": [], "kavita": []})
+            return jsonify({"suwayomi": [], "kavita": [], "manga": []})
         with suggestions_lock:
             if suggestions["data"] is None or time.monotonic() - suggestions["at"] > SUGGESTIONS_TTL:
                 try:
                     data = titles()
                     suggestions.update(at=time.monotonic(), data={
-                        k: sorted(set(data.get(k) or []), key=str.casefold) for k in ("suwayomi", "kavita")})
+                        **{k: sorted(set(data.get(k) or []), key=str.casefold) for k in ("suwayomi", "kavita")},
+                        "manga": sorted(data.get("manga") or [], key=lambda m: m["title"].casefold())})
                 except Exception as exc:  # the form still works with typed names
                     log.warning("Could not load title suggestions for the alias form: %s", exc)
-                    return jsonify({"suwayomi": [], "kavita": [], "error": str(exc)})
+                    return jsonify({"suwayomi": [], "kavita": [], "manga": [], "error": str(exc)})
             return jsonify(suggestions["data"])
 
     @app.get("/api/status")

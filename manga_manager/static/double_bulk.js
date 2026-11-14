@@ -126,6 +126,9 @@
   $('#process-refresh').onclick = preview;
   $('#process-apply').onclick = async () => {
     if (!token) return;
+    const trashed = controls.reduce((list, c) => list.concat(c.files.filter(f => f.id !== c.selected)), []);
+    const days = plan.trashRetentionDays > 0 ? `They are deleted for good after ${plan.trashRetentionDays} days.` : 'They stay in the Trash until you empty it.';
+    if (!confirm(`Move ${trashed.length} files (${bytes(trashed.reduce((n, f) => n + f.bytes, 0))}) from ${plan.chapterCount} chapters to the Trash? ${days}`)) return;
     $('#process-apply').disabled = true; $('#process-refresh').disabled = true;
     $('#process-summary').textContent = 'Starting the reviewed choices…';
     const selections = controls.map(c => ({seriesId: c.chapter.seriesId, chapterId: c.chapter.chapterId, keepFileId: c.selected}));

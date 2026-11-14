@@ -110,7 +110,18 @@
     </form>
     <p class="alias-note" id="alias-readonly" hidden>You can look at the aliases, but only accounts listed in config.yml can change them.</p>
     <p class="alias-msg" id="alias-msg" role="status" aria-live="polite"></p>
-    <ul class="alias-list" id="alias-rows"></ul>
+    <div class="alias-tools">
+      <label class="alias-find"><svg class="i" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <input id="alias-search" type="search" placeholder="Search manga" aria-label="Search manga in the aliases" autocomplete="off"></label>
+      <div class="alias-tabs" id="alias-tabs" role="group" aria-label="Filter manga">
+        <button class="ch" type="button" data-filter="all" aria-pressed="true">All <b>0</b></button>
+        <button class="ch" type="button" data-filter="missing-alias" aria-pressed="false">Missing alias <b>0</b></button>
+        <button class="ch" type="button" data-filter="missing-source" aria-pressed="false">Missing Kavita source <b>0</b></button>
+        <button class="ch" type="button" data-filter="done" aria-pressed="false">Done <b>0</b></button>
+      </div>
+    </div>
+    <ul class="alias-grid" id="alias-rows"></ul>
+    <button class="btn" type="button" id="alias-more" hidden>Show more</button>
   </div>
 </dialog>
 
@@ -372,7 +383,7 @@ document.addEventListener("keydown", (e) => {
 
 // ---------- aliases (#12) and moving chapters (#16) ----------
 const aliasDlg = $("#aliases"), aliasForm = $("#alias-form"), aliasMsg = $("#alias-msg");
-const aliasState = { editing: null, items: [], suggested: false, pending: null, suwa: [], kav: [] };
+const aliasState = { editing: null, items: [], suggested: false, pending: null, suwa: [], kav: [], manga: [], filter: "all", q: "", limit: 48 };
 function aliasNote(text, kind = "") { aliasMsg.textContent = text; aliasMsg.className = "alias-msg" + (kind ? " " + kind : ""); }
 const RANKS = ["Normal", "Official", "Uncensored", "Official uncensored"];
 const detectRank = (t) => (/\bofficial\b/i.test(t) ? 1 : 0) + (/\buncensored\b/i.test(t) ? 2 : 0);
@@ -427,28 +438,85 @@ function confirmBox(p) {
       <span class="sub">${p.plan.moves.map(m => `${esc(m.from)} → ${esc(m.to)}: ${m.files} file(s)`).join(" · ")}${repl ? ` · ${repl} replace an existing file` : ""} · Kavita is rescanned afterwards</span>
       <div class="acts"><button class="btn sig sm" type="button" data-act="move-go">Move ${total} file${total === 1 ? "" : "s"} and rescan</button><button class="btn sm" type="button" data-act="cancel">Cancel</button></div></div>`;
 }
+// #9: one card per manga. Status: "done" (aliased with a Kavita source, or matched by name), "missing-source"
+// (alias without a Kavita series yet) or "missing-alias" (no alias and no Kavita series with the same name).
+const STATUS = {
+  "done": ["Aliased", "M5 12l5 5 9-10"],
+  "matched": ["Matched by name", "M5 12l5 5 9-10"],
+  "missing-source": ["Missing Kavita source", "M12 8v5M12 17h.01"],
+  "missing-alias": ["No alias", "M12 5v14M5 12h14"],
+};
+function aliasEntries() {
+  const meta = new Map(aliasState.manga.map(m => [m.title.toLowerCase(), m]));
+  const kavKeys = new Set(aliasState.kav.map(looseKey));
+  const taken = new Set(aliasState.items.map(a => a.suwayomi_title.toLowerCase()));
+  const out = aliasState.items.map((a, i) => ({ st: a.pending ? "missing-source" : "done", badge: a.pending ? "missing-source" : "done",
+    title: a.suwayomi_title, kav: a.kavita_name, a, i, m: meta.get(a.suwayomi_title.toLowerCase()) }));
+  for (const m of aliasState.manga) {
+    if (taken.has(m.title.toLowerCase())) continue;
+    const k = looseKey(m.title), matched = !!k && kavKeys.has(k);
+    out.push({ st: matched ? "done" : "missing-alias", badge: matched ? "matched" : "missing-alias", title: m.title, kav: "", a: null, i: -1, m });
+  }
+  return out;
+}
+function aliasCard(e, canEdit) {
+  const { a, m } = e, cat = String(m?.category || "");
+  const blurred = !!m && BLUR.includes(cat.toLowerCase()) && !$("#reveal")?.checked;
+  const mature = MATURE.includes(cat.toLowerCase());
+  const img = m ? `<img data-cover-src="thumb/${encodeURIComponent(m.id)}.png" alt="">` : "";
+  const cover = `<div class="cover${blurred ? " blurred" : ""}" data-blur="${blurred ? 1 : 0}" aria-label="${esc(e.title)}">
+      <span class="plate" aria-hidden="true"><span>${esc(e.title)}</span></span>${img}
+      ${mature ? `<span class="age" title="${esc(cat)}: 18+">18+</span>` : ""}
+      ${blurred ? '<button class="veil" type="button">Tap to show cover</button>' : ""}</div>`;
+  const [label, icon] = STATUS[e.badge];
+  const badge = `<span class="status-badge st-${e.st === "done" ? "done" : e.badge}"><svg class="i" viewBox="0 0 24 24"><path d="${icon}"/></svg>${label}</span>`;
+  let line = "", tags = "", actions = "", confirm = "";
+  if (a) {
+    const fromCfg = a.source === "config", eff = a.rank || a.rank_auto || 0, i = e.i;
+    line = a.pending ? `<p class="to pend">Kavita source needed. Nothing is moved until you set it.</p>` : `<p class="to"><span aria-hidden="true">→</span> ${esc(a.kavita_name)}</p>`;
+    if (fromCfg) tags += `<span class="src" title="Set in config.yml">config.yml</span>`;
+    if (a.overridden) tags += `<span class="src" title="An alias added on the dashboard replaces this one">replaced</span>`;
+    if (eff) tags += `<span class="src rank" title="Chapters from this source replace the same chapter from a lower-ranked source">${RANKS[eff]}${a.rank ? "" : " (from the name)"}</span>`;
+    const move = `<button class="btn sm" type="button" data-act="move" data-i="${i}" title="Move chapters filed under the Suwayomi name into the Kavita series">Move chapters</button>`;
+    const prev = eff ? `<button class="btn sm" type="button" data-act="preview" data-i="${i}" title="Show what would be replaced by the chapters waiting in Suwayomi">Preview</button>` : "";
+    if (canEdit) {
+      if (a.pending) actions = `<button class="btn sig sm" type="button" data-act="edit" data-i="${i}">Set Kavita source</button><button class="btn sm" type="button" data-act="del" data-i="${i}">Delete</button>`;
+      else if (fromCfg) actions = a.overridden ? "" : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Change</button>${move}${prev}`;
+      else actions = `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Edit</button>${move}${prev}<button class="btn sm" type="button" data-act="del" data-i="${i}">Delete</button>`;
+    }
+    if (aliasState.pending && aliasState.pending.i === i) confirm = confirmBox(aliasState.pending);
+  } else {
+    line = `<p class="to">${e.badge === "matched" ? "Same name in Kavita, no alias needed." : "Not in Kavita under this name."}</p>`;
+    if (canEdit) actions = `<button class="btn sm" type="button" data-act="add" data-title="${esc(e.title)}">Add alias</button>`;
+  }
+  return `<li class="acard ${catClass(cat)} st-${e.st}${a?.overridden ? " overridden" : ""}${confirm ? " wide" : ""}">
+    ${cover}
+    <div class="abody"><h3>${esc(e.title)}</h3>${badge}${line}${tags ? `<div class="tags">${tags}</div>` : ""}
+    ${confirm || (actions ? `<div class="acts">${actions}</div>` : "")}</div></li>`;
+}
 function aliasRender(data) {
   if (data) aliasState.items = data.items;
   const canEdit = data ? data.can_edit : aliasState.canEdit;
   aliasState.canEdit = canEdit;
   aliasForm.hidden = !canEdit; $("#alias-readonly").hidden = canEdit;
-  const rows = aliasState.items.map((a, i) => {
-    const fromCfg = a.source === "config";
-    const tag = fromCfg ? `<span class="src" title="Set in config.yml">config.yml</span>` : "";
-    const eff = a.rank || a.rank_auto || 0;
-    const rankTag = eff ? `<span class="src rank" title="Chapters from this source replace the same chapter from a lower-ranked source">${RANKS[eff]}${a.rank ? "" : " (from the name)"}</span>` : "";
-    const prev = eff ? `<button class="btn sm" type="button" data-act="preview" data-i="${i}" title="Show what would be replaced by the chapters waiting in Suwayomi">Preview</button>` : "";
-    const over = a.overridden ? `<span class="src" title="An alias added on the dashboard replaces this one">replaced</span>` : "";
-    const move = `<button class="btn sm" type="button" data-act="move" data-i="${i}" title="Move chapters filed under the Suwayomi name into the Kavita series">Move chapters</button>`;
-    let actions = "";
-    if (canEdit) actions = fromCfg
-      ? (a.overridden ? "" : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Change</button>${move}${prev}`)
-      : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Edit</button>${move}${prev}<button class="btn sm" type="button" data-act="del" data-i="${i}">Delete</button>`;
-    const pending = aliasState.pending && aliasState.pending.i === i;
-    return `<li class="arow${a.overridden ? " overridden" : ""}"><div class="names"><span class="a">${esc(a.suwayomi_title)}</span><span class="arr" aria-hidden="true">→</span>
-      <span class="k">${esc(a.kavita_name)}</span>${tag}${over}${rankTag}</div>${pending ? confirmBox(aliasState.pending) : actions ? `<div class="acts">${actions}</div>` : ""}</li>`;
-  }).join("");
-  $("#alias-rows").innerHTML = rows || `<li class="alias-empty">No aliases yet. Most manga don't need one: Manga Manager already matches names that differ only in spelling, punctuation or tags like “(Official)”.</li>`;
+  const entries = aliasEntries();
+  const counts = { all: entries.length, "missing-alias": 0, "missing-source": 0, done: 0 };
+  entries.forEach(e => counts[e.st]++);
+  document.querySelectorAll("#alias-tabs [data-filter]").forEach(b => {
+    b.setAttribute("aria-pressed", String(b.dataset.filter === aliasState.filter));
+    b.querySelector("b").textContent = counts[b.dataset.filter];
+  });
+  const q = aliasState.q.trim().toLowerCase();
+  const hits = entries.filter(e => (aliasState.filter === "all" || e.st === aliasState.filter) &&
+    (!q || `${e.title} ${e.kav} ${e.m?.category || ""}`.toLowerCase().includes(q)));
+  const shown = hits.slice(0, aliasState.limit);
+  const none = !entries.length
+    ? `No aliases yet. Most manga don't need one: Manga Manager already matches names that differ only in spelling, punctuation or tags like “(Official)”.`
+    : `Nothing matches. Clear the search or pick another filter.`;
+  $("#alias-rows").innerHTML = shown.map(e => aliasCard(e, canEdit)).join("") || `<li class="alias-empty">${none}</li>`;
+  const more = $("#alias-more");
+  more.hidden = hits.length <= shown.length;
+  more.textContent = `Show more (${hits.length - shown.length} left)`;
 }
 async function aliasCall(url, body) {
   const res = await fetch(url, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -462,7 +530,8 @@ async function aliasSuggest() {
   aliasState.suggested = true;
   try {
     const s = await aliasCall("api/aliases/suggestions");
-    aliasState.suwa = s.suwayomi || []; aliasState.kav = s.kavita || [];
+    aliasState.suwa = s.suwayomi || []; aliasState.kav = s.kavita || []; aliasState.manga = s.manga || [];
+    aliasRender();      // covers and the "missing alias" cards need the Suwayomi list
   } catch { aliasState.suggested = false; }
 }
 async function openAliases(prefillKavita) {
@@ -470,8 +539,8 @@ async function openAliases(prefillKavita) {
   if (!aliasDlg.open) aliasDlg.showModal();
   try {
     aliasRender(await aliasCall("api/aliases")); aliasNote("");
+    aliasSuggest();
     if (!aliasForm.hidden) {
-      aliasSuggest();
       if (prefillKavita) { $("#alias-kav").value = prefillKavita; $("#alias-suwa").focus(); }
     }
   } catch (e) { aliasNote("Couldn’t load the aliases: " + e.message, "error"); }
@@ -484,6 +553,12 @@ combo($("#alias-suwa"), () => aliasState.suwa, (title) => {
   kav.focus();
 });
 combo($("#alias-kav"), () => aliasState.kav);
+$("#alias-search").addEventListener("input", (e) => { aliasState.q = e.target.value; aliasState.limit = 48; aliasRender(); });
+$("#alias-tabs").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-filter]"); if (!b) return;
+  aliasState.filter = b.dataset.filter; aliasState.limit = 48; aliasRender();
+});
+$("#alias-more").addEventListener("click", () => { aliasState.limit += 48; aliasRender(); });
 $("#alias-close").addEventListener("click", () => aliasDlg.close());
 aliasDlg.addEventListener("click", (e) => { if (e.target === aliasDlg) aliasDlg.close(); });   // a click on the backdrop closes it
 aliasDlg.addEventListener("close", () => load());   // show changed names right away
@@ -500,8 +575,16 @@ aliasForm.addEventListener("submit", async (e) => {
   } catch (err) { aliasNote(err.message, "error"); }
 });
 $("#alias-rows").addEventListener("click", async (e) => {
+  const veil = e.target.closest(".veil");
+  if (veil) { veil.closest(".cover").classList.remove("blurred"); veil.remove(); return; }
   const btn = e.target.closest("button[data-act]"); if (!btn) return;
   const act = btn.dataset.act;
+  if (act === "add") {
+    const title = btn.dataset.title;
+    aliasReset(); $("#alias-suwa").value = title; $("#alias-rank").value = String(detectRank(title));
+    const k = looseKey(title), m = k && aliasState.kav.find(x => looseKey(x) === k); if (m) $("#alias-kav").value = m;
+    aliasForm.scrollIntoView({ block: "start", behavior: "smooth" }); $("#alias-kav").focus({ preventScroll: true }); return;
+  }
   const a = aliasState.items[Number(btn.dataset.i)] || (aliasState.pending && aliasState.items[aliasState.pending.i]);
   if (act === "cancel") { aliasState.pending = null; aliasRender(); aliasNote(""); return; }
   if (act === "edit") {
@@ -510,7 +593,7 @@ $("#alias-rows").addEventListener("click", async (e) => {
     $("#alias-suwa").value = a.suwayomi_title; $("#alias-kav").value = a.kavita_name; $("#alias-rank").value = String(a.rank || 0);
     $("#alias-save").textContent = "Save"; $("#alias-cancel").hidden = false;
     aliasNote(a.source === "config" ? "This saves a dashboard alias that replaces the one in config.yml." : "");
-    $("#alias-kav").focus(); return;
+    aliasForm.scrollIntoView({ block: "start", behavior: "smooth" }); $("#alias-kav").focus({ preventScroll: true }); return;
   }
   if (act === "del") { aliasState.pending = { kind: "delete", i: Number(btn.dataset.i), title: a.suwayomi_title }; aliasRender(); return; }
   if (act === "del-go") {

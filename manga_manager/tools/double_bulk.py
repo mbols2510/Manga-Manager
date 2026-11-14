@@ -57,6 +57,17 @@ class BulkProcessor:
             if keep is None:
                 raise ValueError("Selected file does not belong to this chapter")
             reason = "Selected in preview"
+        # A truncated or empty copy must never win by date: the better copy would be trashed and,
+        # after the retention period, deleted for good.
+        if not keep["bytes"]:
+            raise ValueError("The file to keep is empty; review manually")
+        others = [f for f in files if f["id"] != keep["id"]]
+        if reason != "Selected in preview" and not keep.get("isOfficial"):
+            if keep["bytes"] * 2 < max(f["bytes"] for f in others):
+                raise ValueError("The file to keep is much smaller than another copy; review manually")
+            pages = [f["pages"] for f in others if isinstance(f.get("pages"), int)]
+            if isinstance(keep.get("pages"), int) and pages and keep["pages"] < max(pages):
+                raise ValueError("The file to keep has fewer pages than another copy; review manually")
         def file_info(f):
             return {"id": f["id"], "filePath": f["filePath"], "bytes": f["bytes"],
                     "pages": f.get("pages"), "signature": f["signature"],

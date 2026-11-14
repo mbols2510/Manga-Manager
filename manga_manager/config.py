@@ -71,6 +71,8 @@ class Config:
     suwayomi_username: str = ""
     suwayomi_password: str = ""
     check_download_queue: bool = True   # #8: hold back manga that still have chapters in Suwayomi's queue
+    # #8 (aliases): manga in this Suwayomi category are added to the aliases with an empty Kavita source; "" = off
+    official_library: str = "ADULT_OFFICIAL"
     # kavita
     kavita_url: str = ""
     kavita_api_key: str = ""
@@ -79,6 +81,10 @@ class Config:
     align_series_name: bool = True
     new_series_timeout: int = 300
     scan_delay: int = 60
+    scan_bulk_enabled: bool = False     # #7: one library scan instead of many series scans
+    scan_bulk_threshold: int = 5        # more distinct series than this in a library -> library scan
+    scan_poll_interval: int = 15        # seconds between "is Kavita still scanning?" checks
+    scan_wait_timeout: int = 1800       # give up waiting for Kavita to be free after this many seconds
     # libraries
     libraries: list[LibraryConfig] = field(default_factory=list)
     # manual title mapping: Suwayomi title -> Kavita series name
@@ -169,7 +175,16 @@ class Config:
         return self._alias_fwd().get(suwayomi_title.casefold())
 
     def suwayomi_title_for(self, kavita_name: str) -> str | None:
-        return {v.casefold(): k for k, v in self.all_aliases().items()}.get(kavita_name.casefold())
+        return {v.casefold(): k for k, v in self.all_aliases().items() if v}.get(kavita_name.casefold())
+
+    def has_alias(self, suwayomi_title: str) -> bool:
+        """True when the title has an alias at all, also one whose Kavita source is still empty."""
+        return suwayomi_title.casefold() in self._alias_fwd()
+
+    def alias_pending(self, suwayomi_title: str) -> bool:
+        """An alias exists (auto-added, #8) but its Kavita source is still empty: nothing is moved for it."""
+        value = self._alias_fwd().get(suwayomi_title.casefold())
+        return value is not None and not value.strip()
 
     def all_aliases(self) -> dict[str, str]:
         """config.yml aliases plus dashboard aliases; a dashboard alias replaces one for the same title."""
@@ -288,6 +303,8 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         suwayomi_username=str(suwa.get("username", "") or ""),
         suwayomi_password=str(suwa.get("password", "") or ""),
         check_download_queue=_as_bool(suwa.get("check_download_queue"), True),
+        official_library=str(suwa["official_library"] if suwa.get("official_library") is not None
+                             else "ADULT_OFFICIAL").strip(),
         kavita_url=str(kav.get("url", "")).rstrip("/"),
         kavita_api_key=str(kav.get("api_key", "") or ""),
         # public_url: the address Kavita links on the dashboard open (falls back to url)
@@ -297,6 +314,10 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         new_series_timeout=int(kav.get("new_series_timeout", 300)),
         # scan_delay replaces series_scan_delay (2.0.0-2.0.2); the old name is still read.
         scan_delay=int(kav.get("scan_delay", kav.get("series_scan_delay", 60))),
+        scan_bulk_enabled=_as_bool(kav.get("scan_bulk_enabled"), False),
+        scan_bulk_threshold=int(kav.get("scan_bulk_threshold", 5)),
+        scan_poll_interval=int(kav.get("scan_poll_interval", 15)),
+        scan_wait_timeout=int(kav.get("scan_wait_timeout", 1800)),
         libraries=libraries,
         aliases={str(k): str(v) for k, v in aliases.items()},
         covers_enabled=_as_bool(cov.get("enabled"), True),
@@ -357,6 +378,12 @@ def validate(cfg: Config) -> None:
         problems.append("each library must have a unique kavita_library_id")
     if cfg.scan_delay < 0:
         problems.append("kavita.scan_delay can't be negative")
+    if cfg.scan_bulk_threshold < 0:
+        problems.append("kavita.scan_bulk_threshold can't be negative")
+    if cfg.scan_poll_interval < 1:
+        problems.append("kavita.scan_poll_interval must be at least 1")
+    if cfg.scan_wait_timeout < 0:
+        problems.append("kavita.scan_wait_timeout can't be negative")
     if cfg.web_keep_days < 0:
         problems.append("web.keep_days can't be negative (0 keeps every update)")
     if cfg.ntfy_delay_seconds < 0:

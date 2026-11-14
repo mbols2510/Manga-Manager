@@ -303,3 +303,52 @@ def test_cover_cache_and_conditional_request_avoid_repeated_kavita_calls(api, to
     again = api.get('/api/double-chapters/cover/1', headers={'If-None-Match': first.headers['ETag']})
     assert again.status_code == 304
     assert calls == [1]
+
+
+# ---- review 2026-11-09: M1 (integrity of the file kept) and M3 (admin only) --------------------------
+def _rewrite(tool, name, data, pages=None):
+    series = tool.load('series', {})
+    for s in series.values():
+        for c in s['chapters']:
+            for f in c['files']:
+                if Path(f['filePath']).name == name:
+                    Path(f['filePath']).write_bytes(data)
+                    if pages is not None:
+                        f['pages'] = pages
+    tool.save('series', series)
+
+
+def test_empty_file_is_never_kept(tool):
+    _rewrite(tool, 'newest.cbz', b'')            # interrupted download: newest by mtime, 0 bytes
+    preview = tool.bulk.preview()
+    assert [p['chapterId'] for p in preview['chapters']] == [11]
+    assert any(s['chapterId'] == 21 and 'empty' in s['reason'] for s in preview['skipped'])
+
+
+def test_much_smaller_or_shorter_newest_copy_needs_review(tool):
+    _rewrite(tool, 'newest.cbz', b'x' * 4)       # 4 bytes against 16: truncated
+    skipped = {s['chapterId']: s['reason'] for s in tool.bulk.preview()['skipped']}
+    assert 'smaller' in skipped[21]
+    _rewrite(tool, 'newest.cbz', b'chapter contents', pages=1)   # same size, fewer pages than the copy
+    skipped = {s['chapterId']: s['reason'] for s in tool.bulk.preview()['skipped']}
+    assert 'fewer pages' in skipped[21]
+
+
+def test_official_copy_is_trusted_unless_empty(tool):
+    _rewrite(tool, 'official-new.cbz', b'x' * 4, pages=1)   # small official copy: still the one to keep
+    plan = {p['chapterId']: p for p in tool.bulk.preview()['chapters']}
+    assert plan[11]['keep']['id'] == 2
+    _rewrite(tool, 'official-new.cbz', b'')
+    assert 11 not in [p['chapterId'] for p in tool.bulk.preview()['chapters']]
+
+
+def test_bulk_and_remediate_endpoints_are_admin_only():
+    from manga_manager.web import ADMIN_ENDPOINTS
+    app = Flask('x')
+    names = {f'double_chapters.{n}' for n in ('bulk_preview', 'bulk_apply', 'remediate')}
+    assert names <= ADMIN_ENDPOINTS
+    # guard against a renamed view silently dropping out of the gate
+    import inspect
+    src = inspect.getsource(dc.init)
+    for n in names:
+        assert f'def {n.split(".")[1]}(' in src

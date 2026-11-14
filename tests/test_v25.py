@@ -247,7 +247,7 @@ def test_suggestions_cached_and_failure_tolerated(env):
     c, _ = app_client(cfg, titles=titles)
     first = c.get("/api/aliases/suggestions").json
     assert first["suwayomi"] == [] and "Kavita down" in first["error"]
-    assert c.get("/api/aliases/suggestions").json == {"suwayomi": ["a", "b"], "kavita": ["Z"]}
+    assert c.get("/api/aliases/suggestions").json == {"suwayomi": ["a", "b"], "kavita": ["Z"], "manga": []}
     c.get("/api/aliases/suggestions")
     assert len(calls) == 2                            # kept for a while, not asked on every open
 
