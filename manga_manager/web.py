@@ -274,6 +274,7 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
             title=cfg.web_title,
             blur=[c.lower() for c in cfg.web_blur_categories],
             mature=[c.lower() for c in cfg.web_mature_categories],
+            official_only=bool((cfg.official_library or "").strip()),
             frames=frame_info(),
             keep_days=cfg.web_keep_days,
             categories=[l.label for l in cfg.libraries],

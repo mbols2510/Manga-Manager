@@ -276,9 +276,15 @@ def title_lists(cfg: Config, suwayomi: SuwayomiClient, kavita: KavitaClient):
             lib = cfg.library_for_category(m.categories)
             return lib.label if lib else (m.categories[0] if m.categories else "")
 
+        official = (cfg.official_library or "").strip().casefold()
+
+        def is_official(m) -> bool:     # in the Suwayomi category whose manga are auto-added as aliases (#8)
+            return bool(official) and any(c.strip().casefold() == official for c in m.categories)
+
         return {"suwayomi": [m.title for m in mangas],
                 "kavita": [s.name for s in kavita.all_series() if s.library_id in libs],
-                "manga": [{"title": m.title, "id": m.id, "category": category(m)} for m in mangas]}
+                "manga": [{"title": m.title, "id": m.id, "category": category(m), "official": is_official(m)}
+                          for m in mangas]}
     return load
 
 
