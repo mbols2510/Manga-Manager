@@ -128,6 +128,7 @@
 <script>
 const BLUR = {{ blur|tojson }};
 const MATURE = {{ mature|tojson }};
+const OFFICIAL_ONLY = {{ official_only|tojson }};   // alias list: only official-category manga without an alias get a card
 const FRAMES = {{ frames|tojson }};
 const KEEP_DAYS = {{ keep_days|tojson }};
 const PAGE = 60;
@@ -454,6 +455,7 @@ function aliasEntries() {
     title: a.suwayomi_title, kav: a.kavita_name, a, i, m: meta.get(a.suwayomi_title.toLowerCase()) }));
   for (const m of aliasState.manga) {
     if (taken.has(m.title.toLowerCase())) continue;
+    if (OFFICIAL_ONLY && !m.official) continue;
     const k = looseKey(m.title), matched = !!k && kavKeys.has(k);
     out.push({ st: matched ? "done" : "missing-alias", badge: matched ? "matched" : "missing-alias", title: m.title, kav: "", a: null, i: -1, m });
   }
