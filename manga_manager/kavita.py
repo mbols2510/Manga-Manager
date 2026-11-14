@@ -177,12 +177,14 @@ class KavitaClient:
                     busy = any(isinstance(v, list) and v for v in body.values())
                 else:
                     busy = bool(body)
+                if busy:
+                    return True
         for task in self.SCAN_TASKS:
             resp = self._check(
                 self._request("GET", "/api/Server/is-task-running", params={"methodName": task, "queue": "scan"}),
                 f"checking {task}")
             if resp.json() is True:
-                busy = True
+                return True
         return busy
 
     # -- covers --------------------------------------------------------------

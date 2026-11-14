@@ -36,7 +36,7 @@ kavita:
   align_series_name: true                            # write Kavita's series name into new chapters when the
                                                      # source renamed the manga, so they join the existing series
   new_series_timeout: 300                            # seconds to wait for a new series to appear after a library scan
-  scan_delay: 60                                     # seconds between two scan requests to Kavita
+  scan_delay: 10                                     # seconds between two scan requests to Kavita
                                                      # (library and series scans); 0 = no pause
   scan_bulk_enabled: false                           # many updated series in one library: send ONE library scan
                                                      # instead of a scan per series (off = scan each series)

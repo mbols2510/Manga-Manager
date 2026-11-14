@@ -462,4 +462,4 @@ kavita: {url: "http://k", api_key: k%s}
     f.write_text(base % ", series_scan_delay: 7")
     assert load_config(f).scan_delay == 7
     f.write_text(base % "")
-    assert load_config(f).scan_delay == 60
+    assert load_config(f).scan_delay == 10

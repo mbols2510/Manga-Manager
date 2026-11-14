@@ -17,6 +17,8 @@ from typing import Callable
 
 log = logging.getLogger(__name__)
 
+LOG_EVERY = 60  # seconds between "still waiting" log lines
+
 
 class ScanCoordinator:
     def __init__(self, client, *, sleep: Callable[[float], None] = time.sleep, scan_delay: int = 0,
@@ -90,6 +92,7 @@ class ScanCoordinator:
         if check is None:
             return
         waited = 0
+        logged_at = None
         while True:
             try:
                 busy = check()
@@ -103,6 +106,8 @@ class ScanCoordinator:
                 log.warning("Kavita still not free after %ss; scanning %s anyway", waited, what)
                 return
             step = min(self.poll_interval, self.wait_timeout - waited)
-            log.info("Waiting %ss before scanning %s: %s", step, what, reason)
+            if logged_at is None or waited - logged_at >= LOG_EVERY:
+                log.info("Waiting before scanning %s (polling every %ss): %s", what, self.poll_interval, reason)
+                logged_at = waited
             self.sleep(step)
             waited += step

@@ -353,7 +353,9 @@ class Pipeline:
         if not carries or self.cfg.dry_run:
             return
         try:
-            n = progress.restore(self.kavita, carries, self.sleep)
+            n = progress.restore(self.kavita, carries, self.sleep,
+                                 scan_poll_interval=self.cfg.scan_poll_interval,
+                                 scan_wait_timeout=self.cfg.scan_wait_timeout)
             if n:
                 log.info("Carried read progress over to %d replaced chapter(s)", n)
         except Exception as exc:  # never stop a run over this

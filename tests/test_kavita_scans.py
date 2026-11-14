@@ -256,3 +256,28 @@ def test_config_defaults_and_values(tmp_path):
     f.write_text(BASE % ", scan_bulk_enabled: true, scan_bulk_threshold: 8")
     cfg = load_config(f)
     assert cfg.scan_bulk_enabled is True and cfg.scan_bulk_threshold == 8
+
+
+# ---------------------------------------------------------------- 3.3.2: fewer requests, quieter log
+def test_client_stops_asking_after_first_running_task():
+    def running(kw):
+        return Resp(200, kw["params"]["methodName"] == "ScanSeries")
+    c, seen = client_with({"/api/Server/is-task-running": running, "/api/Server/activity": Resp(404)})
+    assert c.is_scan_busy() is True
+    assert [p["methodName"] for path, p in seen if p] == ["ScanSeries"]
+
+
+def test_client_delayed_activity_skips_task_checks():
+    c, seen = client_with({"/api/Server/is-task-running": Resp(200, False),
+                           "/api/Server/activity": Resp(200, {"delayed": [{"name": "x"}]})})
+    assert c.is_scan_busy() is True
+    assert [path for path, _ in seen] == ["/api/Server/activity"]
+
+
+def test_wait_logs_first_poll_then_once_a_minute(caplog):
+    coord, client, sleeps = make(FakeClient(busy=[True] * 8 + [False]), poll_interval=15)
+    coord.request_series(1, 10, "A")
+    with caplog.at_level(logging.INFO):
+        coord.flush()
+    assert sleeps == [15] * 8
+    assert caplog.text.count("Waiting before scanning") == 2   # at 0 s and at 60 s

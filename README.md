@@ -12,8 +12,8 @@ One self-hosted dashboard for a Suwayomi → Kavita manga setup. It replaces fou
 
 One container, one login, one PostgreSQL database.
 
-**3.3.2:** marking a chapter read now uses Kavita's `/api/Reader/mark-multiple-read`; Kavita calls
-verified against a real server. See [release notes](docs/releases/3.3.2.md).
+**3.3.2:** marking a chapter read now uses Kavita's `/api/Reader/mark-multiple-read`, scans are spaced 10 s
+instead of 60 s, read progress waits for the scan to finish; Kavita calls verified against a real server. See [release notes](docs/releases/3.3.2.md).
 
 **3.3.1:** hardens bulk duplicate cleanup (admin only, never keeps an empty or truncated
 copy, final confirmation) and makes image publishing wait for the tests. See
