@@ -12,9 +12,11 @@ One self-hosted dashboard for a Suwayomi → Kavita manga setup. It replaces fou
 
 One container, one login, one PostgreSQL database.
 
-**3.2.2:** fixes the bulk preview's host/container path conflict, uses the existing
-chapter-card design with editable choices, and reduces cover-loading queues on
-both tabs. See [release notes](docs/releases/3.2.2.md). The 3.2.1 release restored
+**3.3.0:** Kavita scans now wait for each other (with an optional library scan for
+bulk updates), official chapters keep your read progress when they replace a chapter,
+official manga from Suwayomi are added to the aliases automatically, and the alias
+menu shows cover cards with status filters. See [release notes](docs/releases/3.3.0.md).
+3.2.2 fixed the bulk preview's path conflict and cover-loading queues; 3.2.1 restored
 the 3.1.0 baseline, retired the Android app and introduced the PWA.
 
 ## Install

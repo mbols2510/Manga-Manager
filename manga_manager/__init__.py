@@ -1,2 +1,2 @@
 """Manga Manager: moves Suwayomi downloads into Kavita, notifies via ntfy and keeps covers right."""
-__version__ = "3.2.2"
+__version__ = "3.3.0"
