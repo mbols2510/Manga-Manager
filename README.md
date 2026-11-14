@@ -12,6 +12,9 @@ One self-hosted dashboard for a Suwayomi → Kavita manga setup. It replaces fou
 
 One container, one login, one PostgreSQL database.
 
+**3.3.5:** read progress is carried over when a new file with the same name overwrites a chapter. See
+[release notes](docs/releases/3.3.5.md).
+
 **3.3.4:** "Move chapters" for an aliased official / uncensored title now replaces the same chapter from a
 lower-ranked source instead of leaving both. See [release notes](docs/releases/3.3.4.md).
 
