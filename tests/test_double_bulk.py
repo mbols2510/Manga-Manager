@@ -46,7 +46,7 @@ def tool(tmp_path):
     root = tmp_path / 'manga'
     root.mkdir()
     settings = {'dc.manga_root': str(root), 'dc.trash_retention_days': 7}
-    cfg = Config(data_dir=tmp_path / 'data', config_dir=tmp_path / 'config')
+    cfg = Config(data_dir=tmp_path / 'data', config_dir=tmp_path / 'config', scan_delay=0)
     ctx = AppContext(cfg, MemoryDB(), SimpleNamespace(get=lambda key, default=None: settings.get(key, default)))
     tool = dc.DoubleChapters(ctx)
     tool._client = Client()
@@ -352,3 +352,55 @@ def test_bulk_and_remediate_endpoints_are_admin_only():
     src = inspect.getsource(dc.init)
     for n in names:
         assert f'def {n.split(".")[1]}(' in src
+
+
+# ---------------------------------------------------------------- 3.3.2: same scan queue as Move Manga
+def _record_sleeps(monkeypatch):
+    sleeps, real = [], time.sleep
+    monkeypatch.setattr(time, 'sleep', lambda s: (sleeps.append(s), real(0.001))[1])
+    return sleeps
+
+
+def test_bulk_rescans_wait_for_idle_and_are_spaced(tool, monkeypatch):
+    sleeps = _record_sleeps(monkeypatch)
+    tool.ctx.cfg.scan_delay = 7
+    events, busy = [], [True, False, False]
+    tool.client.is_scan_busy = lambda: (events.append('busy?'), busy.pop(0) if busy else False)[1]
+    tool.client.scan_series = lambda sid, lib: (events.append(f'scan {sid}'), True)[1]
+    tool.bulk.start(tool.bulk.preview()['fingerprint'])
+    wait_finished(tool)
+    assert events == ['busy?', 'busy?', 'scan 1', 'busy?', 'scan 2']   # waits while busy, one scan at a time
+    assert 15 in sleeps and sleeps.count(7) == 1                      # poll interval, then one gap between scans
+    assert tool.bulk.status()['failed'] == 0
+
+
+def test_web_rescan_waits_only_briefly(tool, monkeypatch):
+    sleeps = _record_sleeps(monkeypatch)
+    tool.client.is_scan_busy = lambda: True            # Kavita never goes idle
+    scans = []
+    tool.client.scan_series = lambda sid, lib: (scans.append(sid), True)[1]
+    assert tool.scan_series(5, 1, max_wait=dc.WEB_SCAN_WAIT) is True
+    assert scans == [5] and sum(sleeps) == dc.WEB_SCAN_WAIT
+
+
+def test_double_chapters_client_uses_shared_busy_check():
+    client = dc.KavitaClient('http://k', 'key')
+    seen = []
+
+    class R:
+        def __init__(self, status, body=None):
+            self.status_code, self.ok, self._b, self.text = status, status < 400, body, ''
+
+        def json(self):
+            return self._b
+
+    def fake(method, path, **kw):
+        seen.append(path)
+        if path == '/api/Server/activity':
+            return R(404)
+        return R(200, kw['params']['methodName'] == 'ScanLibrary')
+    client._request = fake
+    assert client.is_scan_busy() is True
+    client._request = lambda m, p, **kw: R(500) if p != '/api/Server/activity' else R(404)
+    with pytest.raises(dc.KavitaError):                 # the tool's own error type
+        client.is_scan_busy()

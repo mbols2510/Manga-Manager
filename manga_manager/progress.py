@@ -65,8 +65,32 @@ def target_page(read: int, old_pages: int, new_pages: int) -> int | None:
     return max(1, min(read, new_pages - 1))
 
 
-def restore(kavita, carries: list[Carry], sleep, attempts: int = POLL_ATTEMPTS, delay: int = POLL_SECONDS) -> int:
-    """After the Kavita scan, give the new chapters the progress of the ones they replaced. Returns how many."""
+def wait_for_scans(kavita, sleep, poll_interval: int = 15, timeout: int = 1800) -> None:
+    """Block until Kavita reports no running or queued scan (bounded). Does nothing when that can't be told."""
+    check = getattr(kavita, "is_scan_busy", None)
+    if check is None:
+        return
+    waited = 0
+    while waited < timeout:
+        try:
+            if not check():
+                return
+        except Exception as exc:  # noqa: BLE001
+            log.debug("Could not read Kavita's scan state, polling for the chapters directly: %s", exc)
+            return
+        step = max(1, min(poll_interval, timeout - waited))
+        sleep(step)
+        waited += step
+    log.warning("Kavita was still scanning after %ss; checking for the new chapters anyway", timeout)
+
+
+def restore(kavita, carries: list[Carry], sleep, attempts: int = POLL_ATTEMPTS, delay: int = POLL_SECONDS,
+            scan_poll_interval: int = 15, scan_wait_timeout: int = 1800) -> int:
+    """After the Kavita scan, give the new chapters the progress of the ones they replaced. Returns how many.
+
+    Waits for Kavita's scans to finish first, so a long scan can't outlast the polling below."""
+    if carries:
+        wait_for_scans(kavita, sleep, scan_poll_interval, scan_wait_timeout)
     pending = list(carries)
     done = 0
     for attempt in range(attempts):

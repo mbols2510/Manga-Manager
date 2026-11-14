@@ -98,7 +98,7 @@ def test_pipeline_wiring_without_database(tmp_path, monkeypatch):
     old.write_bytes(b"x")
     kav = ProgressKavita([], "Old Chapter 5.cbz", 20, 20, "Chapter 5.cbz", 24)
     monkeypatch.setattr(preferred, "to_trash", lambda *a, **k: old.unlink())
-    pipe = Pipeline(SimpleNamespace(dry_run=False, data_dir=tmp_path), None, kav, None,
+    pipe = Pipeline(SimpleNamespace(dry_run=False, data_dir=tmp_path, scan_poll_interval=15, scan_wait_timeout=1800), None, kav, None,
                     SimpleNamespace(db=None, forget_sources=lambda *a: None), None, sleep=lambda s: None)
     plan = preferred.Plan(replace=[(Path("Chapter 5.cbz"), old, "5")])
     lib = SimpleNamespace(kavita_library_id=1)
@@ -107,3 +107,59 @@ def test_pipeline_wiring_without_database(tmp_path, monkeypatch):
     kav.scanned = True
     pipe._restore_progress()
     assert kav.writes == [("read", 12)] and pipe._carry == []
+
+
+# ---------------------------------------------------------------- 3.3.2: wait for the scan first
+def test_wait_for_scans_polls_until_idle_then_returns():
+    class K:
+        def __init__(self):
+            self.answers = [True, True, False]
+
+        def is_scan_busy(self):
+            return self.answers.pop(0)
+    sleeps = []
+    progress.wait_for_scans(K(), sleeps.append, poll_interval=15, timeout=100)
+    assert sleeps == [15, 15]
+
+
+def test_wait_for_scans_is_bounded_and_survives_errors():
+    class Busy:
+        def is_scan_busy(self):
+            return True
+    sleeps = []
+    progress.wait_for_scans(Busy(), sleeps.append, poll_interval=40, timeout=100)
+    assert sleeps == [40, 40, 20]
+
+    class Broken:
+        def is_scan_busy(self):
+            raise RuntimeError("boom")
+    sleeps.clear()
+    progress.wait_for_scans(Broken(), sleeps.append)
+    assert sleeps == []
+    progress.wait_for_scans(object(), sleeps.append)       # no is_scan_busy at all
+    assert sleeps == []
+
+
+def test_restore_waits_for_scan_before_reading_chapters():
+    events = []
+
+    class K:
+        busy = [True, False]
+
+        def is_scan_busy(self):
+            events.append("busy?")
+            return self.busy.pop(0)
+
+        def series_chapters(self, sid):
+            events.append("chapters")
+            return []
+    c = progress.Carry(1, 7, "x.cbz", 5, 10)
+    progress.restore(K(), [c], lambda s: events.append("sleep"), attempts=1)
+    assert events == ["busy?", "sleep", "busy?", "chapters"]
+
+
+def test_restore_without_carries_does_not_touch_kavita():
+    class K:
+        def is_scan_busy(self):
+            raise AssertionError("not needed")
+    assert progress.restore(K(), [], lambda s: None) == 0

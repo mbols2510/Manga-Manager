@@ -17,6 +17,8 @@ from typing import Callable
 
 log = logging.getLogger(__name__)
 
+LOG_EVERY = 60  # seconds between "still waiting" log lines
+
 
 class ScanCoordinator:
     def __init__(self, client, *, sleep: Callable[[float], None] = time.sleep, scan_delay: int = 0,
@@ -86,23 +88,36 @@ class ScanCoordinator:
                 log.warning("Kavita scan of %s failed: %s", what, exc)
 
     def _wait_until_free(self, what: str) -> None:
-        check = getattr(self.client, "is_scan_busy", None)
-        if check is None:
+        wait_until_free(getattr(self.client, "is_scan_busy", None), what, sleep=self.sleep,
+                        poll_interval=self.poll_interval, wait_timeout=self.wait_timeout)
+
+
+def wait_until_free(check, what: str, *, sleep: Callable[[float], None] = time.sleep, poll_interval: int = 15,
+                    wait_timeout: int = 1800) -> None:
+    """Poll `check()` (True = Kavita busy) until it is False, for at most `wait_timeout` seconds.
+
+    A failing check counts as busy. After the timeout it returns anyway. `check=None` returns at once.
+    Used by the coordinator and by the Double Chapters tool, so both wait the same way."""
+    if check is None:
+        return
+    poll_interval = max(1, poll_interval)
+    waited = 0
+    logged_at = None
+    while True:
+        try:
+            busy = check()
+            reason = "Kavita is busy with another scan"
+        except Exception as exc:  # unknown state: treat like busy and ask again later
+            busy = True
+            reason = f"could not read Kavita's scan state ({exc})"
+        if not busy:
             return
-        waited = 0
-        while True:
-            try:
-                busy = check()
-                reason = "Kavita is busy with another scan"
-            except Exception as exc:  # unknown state: treat like busy and ask again later
-                busy = True
-                reason = f"could not read Kavita's scan state ({exc})"
-            if not busy:
-                return
-            if waited >= self.wait_timeout:
-                log.warning("Kavita still not free after %ss; scanning %s anyway", waited, what)
-                return
-            step = min(self.poll_interval, self.wait_timeout - waited)
-            log.info("Waiting %ss before scanning %s: %s", step, what, reason)
-            self.sleep(step)
-            waited += step
+        if waited >= wait_timeout:
+            log.warning("Kavita still not free after %ss; scanning %s anyway", waited, what)
+            return
+        step = min(poll_interval, wait_timeout - waited)
+        if logged_at is None or waited - logged_at >= LOG_EVERY:
+            log.info("Waiting before scanning %s (polling every %ss): %s", what, poll_interval, reason)
+            logged_at = waited
+        sleep(step)
+        waited += step

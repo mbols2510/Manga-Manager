@@ -80,7 +80,7 @@ class Config:
     kavita_plugin_name: str = "MoveManga"
     align_series_name: bool = True
     new_series_timeout: int = 300
-    scan_delay: int = 60
+    scan_delay: int = 10
     scan_bulk_enabled: bool = False     # #7: one library scan instead of many series scans
     scan_bulk_threshold: int = 5        # more distinct series than this in a library -> library scan
     scan_poll_interval: int = 15        # seconds between "is Kavita still scanning?" checks
@@ -313,7 +313,7 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         align_series_name=_as_bool(kav.get("align_series_name"), True),
         new_series_timeout=int(kav.get("new_series_timeout", 300)),
         # scan_delay replaces series_scan_delay (2.0.0-2.0.2); the old name is still read.
-        scan_delay=int(kav.get("scan_delay", kav.get("series_scan_delay", 60))),
+        scan_delay=int(kav.get("scan_delay", kav.get("series_scan_delay", 10))),
         scan_bulk_enabled=_as_bool(kav.get("scan_bulk_enabled"), False),
         scan_bulk_threshold=int(kav.get("scan_bulk_threshold", 5)),
         scan_poll_interval=int(kav.get("scan_poll_interval", 15)),

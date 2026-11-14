@@ -24,6 +24,8 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from .. import __version__, notify
 from ..image_cache import ImageBusy, ImageCache
+from ..kavita import ScanStateMixin
+from ..kavita_scans import wait_until_free
 from ..settings import WEEKDAYS, Setting, register
 from .double_bulk import BulkConflict, BulkProcessor
 
@@ -75,12 +77,17 @@ def _get(d: dict, *keys: str, default=None):
 
 
 # --------------------------------------------------------------------------- Kavita
+WEB_SCAN_WAIT = 30  # seconds a web request may wait for Kavita to finish another scan
+
+
 class KavitaError(RuntimeError):
     pass
 
 
-class KavitaClient:
+class KavitaClient(ScanStateMixin):
     """The parts of Kavita's API this tab needs (sync, token cached for ~2h)."""
+
+    _scan_error = KavitaError
 
     def __init__(self, base_url: str, api_key: str):
         self.base_url = base_url.rstrip("/")
@@ -150,9 +157,8 @@ class KavitaClient:
         return resp.json()
 
     def mark_chapter_read(self, series_id: int, chapter_id: int) -> bool:
-        resp = self._request("POST", "/api/reader/mark-chapter-read",
-                             params={"seriesId": series_id, "chapterId": chapter_id, "generateReadingSession": "false"},
-                             json={"seriesId": series_id, "chapterId": chapter_id})
+        resp = self._request("POST", "/api/Reader/mark-multiple-read",
+                             json={"seriesId": series_id, "volumeIds": [], "chapterIds": [chapter_id]})
         return resp.status_code in (200, 204)
 
     def scan_series(self, series_id: int, library_id: int | None) -> bool:
@@ -319,6 +325,18 @@ class DoubleChapters:
         if self._client is None or key != self._client_key:
             self._client, self._client_key = KavitaClient(*key), key
         return self._client
+
+    def scan_series(self, series_id: int, library_id: int | None, *, max_wait: int | None = None) -> bool:
+        """Rescan one series, first waiting until Kavita is not busy with another scan.
+
+        Same rule as the Move Manga scan queue (kavita.scan_poll_interval / scan_wait_timeout). Web requests
+        pass a small `max_wait` so they never hang for long; Kavita then queues the scan itself."""
+        cfg = self.ctx.cfg
+        timeout = getattr(cfg, "scan_wait_timeout", 1800)
+        wait_until_free(getattr(self.client, "is_scan_busy", None), f"series {series_id}",
+                        sleep=time.sleep, poll_interval=getattr(cfg, "scan_poll_interval", 15),
+                        wait_timeout=timeout if max_wait is None else min(max_wait, timeout))
+        return self.client.scan_series(series_id, library_id)
 
     @property
     def manga_root(self) -> str:
@@ -561,7 +579,7 @@ class DoubleChapters:
             del trash[trash_id]
             self.save("trash", trash)
         try:
-            self.client.scan_series(entry["seriesId"], entry.get("libraryId"))
+            self.scan_series(entry["seriesId"], entry.get("libraryId"), max_wait=WEB_SCAN_WAIT)
         except Exception:  # noqa: BLE001
             pass
         self.rescan_single_series(entry["seriesId"])
@@ -823,7 +841,7 @@ def init(ctx) -> Blueprint:
     def kavita_scan(series_id: int):
         body = request.get_json(silent=True) or {}
         try:
-            tool.client.scan_series(series_id, body.get("libraryId"))
+            tool.scan_series(series_id, body.get("libraryId"), max_wait=WEB_SCAN_WAIT)
         except KavitaError as exc:
             return err(str(exc), 502)
         if body.get("chapters"):
