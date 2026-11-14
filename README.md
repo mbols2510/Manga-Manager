@@ -12,6 +12,9 @@ One self-hosted dashboard for a Suwayomi → Kavita manga setup. It replaces fou
 
 One container, one login, one PostgreSQL database.
 
+**3.3.3:** the Aliases page only lists official-category manga that have no alias yet, instead of every
+manga. See [release notes](docs/releases/3.3.3.md).
+
 **3.3.2:** marking a chapter read now uses Kavita's `/api/Reader/mark-multiple-read`, scans are spaced 10 s
 instead of 60 s, read progress waits for the scan to finish; Kavita calls verified against a real server. See [release notes](docs/releases/3.3.2.md).
 
