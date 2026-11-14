@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:   # reused by docker-publish.yml so an image is only built from tested code
 
 permissions:
   contents: read

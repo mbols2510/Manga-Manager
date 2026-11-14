@@ -12,6 +12,10 @@ One self-hosted dashboard for a Suwayomi → Kavita manga setup. It replaces fou
 
 One container, one login, one PostgreSQL database.
 
+**3.3.1:** hardens bulk duplicate cleanup (admin only, never keeps an empty or truncated
+copy, final confirmation) and makes image publishing wait for the tests. See
+[release notes](docs/releases/3.3.1.md).
+
 **3.3.0:** Kavita scans now wait for each other (with an optional library scan for
 bulk updates), official chapters keep your read progress when they replace a chapter,
 official manga from Suwayomi are added to the aliases automatically, and the alias

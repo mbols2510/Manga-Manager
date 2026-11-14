@@ -27,7 +27,9 @@ log = logging.getLogger(__name__)
 # Settings hold the connection secrets and paths, so only an administrator (a config.yml account or the
 # first account) may open or change them.
 ADMIN_ENDPOINTS = {"core.settings_page", "core.settings_get", "core.settings_save", "core.settings_restart",
-                   "core.test_notification"}
+                   "core.test_notification",
+                   # these move files to the Trash across the whole library
+                   "double_chapters.bulk_preview", "double_chapters.bulk_apply", "double_chapters.remediate"}
 PUBLIC_ENDPOINTS = {"login", "signup", "health", "core.health", "static", "manifest", "service_worker", "offline"}
 
 
