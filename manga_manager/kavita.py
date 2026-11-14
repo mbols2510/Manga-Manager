@@ -189,7 +189,7 @@ class KavitaClient:
     def upload_series_cover(self, series_id: int, png_bytes: bytes, lock: bool = True) -> str:
         """Set a series cover. Returns the method used ('file' or 'base64').
 
-        Kavita >= 0.9.1 supports staging the image as a multipart upload
+        Newer Kavita builds support staging the image as a multipart upload
         (/api/Upload/upload-by-file) and then referencing it by file name, which avoids
         sending a large base64 blob. Older versions only accept base64, so we fall back.
         """
@@ -199,7 +199,7 @@ class KavitaClient:
                 files={"file": (f"series{series_id}.png", png_bytes, "image/png")},
             )
             if resp.status_code in (404, 405):
-                log.info("Kavita has no upload-by-file endpoint (older than 0.9.1); using base64 uploads")
+                log.info("Kavita has no upload-by-file endpoint (e.g. 0.9.1.4); using base64 uploads")
                 self._upload_by_file_supported = False
             else:
                 self._check(resp, f"staging cover for series {series_id}")
