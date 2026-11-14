@@ -150,9 +150,8 @@ class KavitaClient:
         return resp.json()
 
     def mark_chapter_read(self, series_id: int, chapter_id: int) -> bool:
-        resp = self._request("POST", "/api/reader/mark-chapter-read",
-                             params={"seriesId": series_id, "chapterId": chapter_id, "generateReadingSession": "false"},
-                             json={"seriesId": series_id, "chapterId": chapter_id})
+        resp = self._request("POST", "/api/Reader/mark-multiple-read",
+                             json={"seriesId": series_id, "volumeIds": [], "chapterIds": [chapter_id]})
         return resp.status_code in (200, 204)
 
     def scan_series(self, series_id: int, library_id: int | None) -> bool:

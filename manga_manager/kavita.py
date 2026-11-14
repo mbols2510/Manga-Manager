@@ -148,10 +148,10 @@ class KavitaClient:
         )
 
     def mark_chapter_read(self, series_id: int, chapter_id: int) -> None:
+        # Kavita has no per-chapter "mark read" route; mark-multiple-read takes volume and chapter ids.
         self._check(
-            self._request("POST", "/api/reader/mark-chapter-read",
-                          params={"seriesId": series_id, "chapterId": chapter_id, "generateReadingSession": "false"},
-                          json={"seriesId": series_id, "chapterId": chapter_id}),
+            self._request("POST", "/api/Reader/mark-multiple-read",
+                          json={"seriesId": series_id, "volumeIds": [], "chapterIds": [chapter_id]}),
             f"marking chapter {chapter_id} read",
         )
 
