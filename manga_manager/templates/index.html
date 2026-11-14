@@ -437,16 +437,17 @@ function aliasRender(data) {
     const tag = fromCfg ? `<span class="src" title="Set in config.yml">config.yml</span>` : "";
     const eff = a.rank || a.rank_auto || 0;
     const rankTag = eff ? `<span class="src rank" title="Chapters from this source replace the same chapter from a lower-ranked source">${RANKS[eff]}${a.rank ? "" : " (from the name)"}</span>` : "";
-    const prev = eff ? `<button class="btn sm" type="button" data-act="preview" data-i="${i}" title="Show what would be replaced by the chapters waiting in Suwayomi">Preview</button>` : "";
+    const prev = eff && !a.pending ? `<button class="btn sm" type="button" data-act="preview" data-i="${i}" title="Show what would be replaced by the chapters waiting in Suwayomi">Preview</button>` : "";
     const over = a.overridden ? `<span class="src" title="An alias added on the dashboard replaces this one">replaced</span>` : "";
     const move = `<button class="btn sm" type="button" data-act="move" data-i="${i}" title="Move chapters filed under the Suwayomi name into the Kavita series">Move chapters</button>`;
     let actions = "";
-    if (canEdit) actions = fromCfg
+    if (a.pending) actions = canEdit ? `<button class="btn sig sm" type="button" data-act="edit" data-i="${i}">Set Kavita source</button><button class="btn sm" type="button" data-act="del" data-i="${i}">Delete</button>` : "";
+    else if (canEdit) actions = fromCfg
       ? (a.overridden ? "" : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Change</button>${move}${prev}`)
       : `<button class="btn sm" type="button" data-act="edit" data-i="${i}">Edit</button>${move}${prev}<button class="btn sm" type="button" data-act="del" data-i="${i}">Delete</button>`;
     const pending = aliasState.pending && aliasState.pending.i === i;
     return `<li class="arow${a.overridden ? " overridden" : ""}"><div class="names"><span class="a">${esc(a.suwayomi_title)}</span><span class="arr" aria-hidden="true">→</span>
-      <span class="k">${esc(a.kavita_name)}</span>${tag}${over}${rankTag}</div>${pending ? confirmBox(aliasState.pending) : actions ? `<div class="acts">${actions}</div>` : ""}</li>`;
+      ${a.pending ? `<span class="k pend">Kavita source needed</span><span class="src pend" title="Added automatically from the official library. Nothing is moved for this manga until you set its Kavita series.">pending</span>` : `<span class="k">${esc(a.kavita_name)}</span>`}${tag}${over}${rankTag}</div>${pending ? confirmBox(aliasState.pending) : actions ? `<div class="acts">${actions}</div>` : ""}</li>`;
   }).join("");
   $("#alias-rows").innerHTML = rows || `<li class="alias-empty">No aliases yet. Most manga don't need one: Manga Manager already matches names that differ only in spelling, punctuation or tags like “(Official)”.</li>`;
 }

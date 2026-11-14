@@ -105,10 +105,10 @@ def create_app(cfg: Config, history: History, covers: CoverStore, scheduler: Sch
         cfg.dashboard_aliases = dash
         cfg.dashboard_ranks = history.alias_ranks()
         mine = {k.casefold() for k in dash}
-        items = [{"suwayomi_title": k, "kavita_name": v, "source": "dashboard",
+        items = [{"suwayomi_title": k, "kavita_name": v, "source": "dashboard", "pending": not v.strip(),
                   "rank": cfg.dashboard_ranks.get(k.casefold(), 0), "rank_auto": detect_rank(k)} for k, v in dash.items()]
         items += [{"suwayomi_title": k, "kavita_name": v, "source": "config", "overridden": k.casefold() in mine,
-                   "rank": 0, "rank_auto": detect_rank(k)}
+                   "pending": not v.strip(), "rank": 0, "rank_auto": detect_rank(k)}
                   for k, v in cfg.aliases.items()]
         items.sort(key=lambda i: (i["suwayomi_title"].casefold(), i["source"] != "dashboard"))
         return {"items": items, "can_edit": can_edit_aliases()}

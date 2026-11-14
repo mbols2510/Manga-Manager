@@ -42,6 +42,11 @@ removed (`(Official)`, `[Digital]`, `〘Official〙`, `【Mature】` …). That 
 it points to a single series, so it never guesses between two candidates. An alias is tried first:
 one added on the dashboard, else one from `aliases` in `config.yml`.
 
+At the start of every run, manga in the Suwayomi category `suwayomi.official_library` (default `ADULT_OFFICIAL`) get an
+alias with an **empty** Kavita source (source type official), unless they already have an alias. The run logs each
+one it adds. A manga whose alias has an empty Kavita source is skipped (reported as skipped) and its files stay in
+Suwayomi's folder until the Kavita series is filled in on the dashboard.
+
 New chapters are always moved into the folder Kavita already uses for the series, so a series is
 never split across two folders.
 

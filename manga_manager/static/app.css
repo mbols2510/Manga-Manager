@@ -202,6 +202,8 @@ dialog.panel::backdrop { background: rgba(0, 0, 0, .62); }
 .arow .names { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
 .arow .a { font-weight: 700; overflow-wrap: anywhere; } .arow .arr { color: var(--ink-soft); } .arow .k { overflow-wrap: anywhere; }
 .arow .src { font-size: .75rem; color: var(--ink-soft); border: 1px solid var(--rule); border-radius: 999px; padding: 2px 8px; }
+.arow .k.pend { color: var(--amber); font-style: italic; }
+.arow .src.pend { color: var(--amber); border-color: var(--amber); }
 .arow.overridden .a, .arow.overridden .k { color: var(--ink-soft); text-decoration: line-through; }
 .arow .acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .confirm { margin-top: 10px; padding: 12px 14px; border-radius: 10px; background: var(--ground); border: 1px dashed var(--ink-soft); display: grid; gap: 4px; }

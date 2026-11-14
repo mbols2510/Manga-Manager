@@ -76,6 +76,10 @@ class Pipeline:
         kavita_index = KavitaIndex(self.kavita.all_series())
         log.info("Loaded %d Suwayomi library entries and %d Kavita series",
                  len(suwa_index.mangas), len(kavita_index.series))
+        try:
+            self.sync_official_aliases(suwa_index)
+        except Exception as exc:  # never stop a run over this
+            log.warning("Could not add the official manga to the aliases: %s", exc)
         downloading = self._active_downloads()
 
         for manga_dir in self._manga_folders():
@@ -171,6 +175,33 @@ class Pipeline:
         except Exception as exc:  # never stop a run over this
             log.warning("Could not read the dashboard aliases: %s", exc)
 
+    def sync_official_aliases(self, suwa_index: SuwayomiIndex) -> list[str]:
+        """#8: add every manga of the official Suwayomi category to the aliases, Kavita source left empty.
+
+        The Kavita source has to be filled in by hand; until then nothing is moved for the manga.
+        Existing aliases (dashboard or config.yml) are never changed, so repeated runs add nothing new.
+        """
+        library = (self.cfg.official_library or "").strip()
+        if not library:
+            return []
+        added, seen = [], set()
+        for manga in suwa_index.mangas:
+            key = manga.title.casefold()
+            if key in seen or not manga.title.strip() or self.cfg.has_alias(manga.title):
+                continue
+            if not any(c.strip().casefold() == library.casefold() for c in manga.categories):
+                continue
+            seen.add(key)
+            if self.cfg.dry_run:
+                log.info("[dry-run] would add %r from %s to the aliases (Kavita source empty)", manga.title, library)
+            elif self.history.add_auto_alias(manga.title, rank=1):
+                added.append(manga.title)
+                log.info("Auto-added %r from %s to the aliases: set its Kavita source on the dashboard "
+                         "(nothing is moved until then)", manga.title, library)
+        if added:
+            self.refresh_aliases()
+        return added
+
     def prune_history(self) -> None:
         """Remove dashboard updates older than web.keep_days (#14)."""
         if self.cfg.dry_run or self.cfg.web_keep_days <= 0:
@@ -196,6 +227,12 @@ class Pipeline:
         if suwa is None:
             msg = f"{manga_dir.name}: not found in the Suwayomi library (ComicInfo series: {info.series!r})"
             log.warning(msg)
+            result.skipped.append(msg)
+            return None
+
+        if self.cfg.alias_pending(suwa.title):
+            msg = f"{suwa.title}: waiting for its Kavita source (set it under Aliases), nothing moved"
+            log.info(msg)
             result.skipped.append(msg)
             return None
 
@@ -344,6 +381,9 @@ class Pipeline:
         self.refresh_aliases()
         kav_name = self.cfg.kavita_name_for(suwayomi_title)
         out = {"applied": False, "moves": [], "message": ""}
+        if self.cfg.alias_pending(suwayomi_title):
+            out["message"] = f"“{suwayomi_title}” is still waiting for its Kavita source. Set it first."
+            return out
         if not kav_name:
             out["message"] = f"There is no alias for “{suwayomi_title}”."
             return out

@@ -57,6 +57,14 @@ source than what Kavita has is dropped the same way. If the preferred file has f
 files are kept and the chapter shows as a duplicate. **Preview** on an alias shows what the waiting downloads would replace.
 Chapters the official source doesn't have yet stay as they are. The switches are under **Settings → Preferred sources**.
 
+## Official library aliases
+
+Manga in the Suwayomi category named by `suwayomi.official_library` (default `ADULT_OFFICIAL`, env
+`SUWAYOMI_OFFICIAL_LIBRARY`, empty turns it off) are added to **Aliases** automatically on every run, as official
+sources. Their Kavita source is left **empty** and shown as *pending*: set the Kavita series by hand under **Aliases**.
+While it is empty, Manga Manager does not move that manga. Aliases that already exist are never changed, so nothing is
+added twice. Deleting a pending alias adds it again on the next run while the manga stays in that category.
+
 ## Discord cards (optional, next to ntfy)
 
 Set `DISCORD_ENABLED=true` and `DISCORD_WEBHOOK_URL` (or use **Settings → Notifications (Discord)**) and every

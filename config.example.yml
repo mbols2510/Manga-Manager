@@ -23,6 +23,9 @@ suwayomi:
   password: ${SUWAYOMI_PASSWORD}
   check_download_queue: true                         # also wait while Suwayomi still has chapters of the manga
                                                      # queued or downloading (failed downloads don't block)
+  official_library: ${SUWAYOMI_OFFICIAL_LIBRARY:ADULT_OFFICIAL}  # Suwayomi category whose manga are added to the aliases
+                                                     # automatically, with the Kavita source left EMPTY. Nothing is moved
+                                                     # for them until you set the Kavita series under Aliases. "" = off
 
 kavita:
   url: ${KAVITA_URL}                                 # how the container reaches Kavita on the NUC (API calls)

@@ -134,6 +134,13 @@ class History:
             c.execute("INSERT INTO aliases (suwayomi_title, kavita_name, updated_by, rank) VALUES (%s,%s,%s,%s)",
                       (suwayomi_title, kavita_name, user, int(rank)))
 
+    def add_auto_alias(self, suwayomi_title: str, rank: int = 0) -> bool:
+        """Add an alias with an empty Kavita source (#8); never touches an existing one (any letter case).
+        Returns True when a row was added, so repeated runs don't duplicate."""
+        with self.db.connect() as c:
+            return c.execute("INSERT INTO aliases (suwayomi_title, kavita_name, updated_by, rank) "
+                             "VALUES (%s,'','auto',%s) ON CONFLICT DO NOTHING", (suwayomi_title, int(rank))).rowcount > 0
+
     def delete_alias(self, suwayomi_title: str) -> bool:
         with self.db.connect() as c:
             return c.execute("DELETE FROM aliases WHERE lower(suwayomi_title) = lower(%s)", (suwayomi_title,)).rowcount > 0
