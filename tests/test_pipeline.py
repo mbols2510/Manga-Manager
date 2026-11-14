@@ -427,11 +427,11 @@ def test_scans_are_spaced_and_redundant_series_scans_skipped(env):
 
     scan_part = [c for c in kavita.calls if c[0] != "sleep" or c[1] == 60]
     assert scan_part == [
-        ("scan_library", 1), ("sleep", 60),
         ("scan_library", 2), ("sleep", 60),
+        ("scan_library", 1), ("sleep", 60),
         ("scan_series", 3, 30), ("sleep", 60),
         ("scan_series", 3, 40),
-    ], "Old E is in library 1, which already gets a library scan"
+    ], "Old E is in library 1, which already gets a library scan; libraries go smallest first"
 
 
 def test_failed_scan_does_not_stop_the_others(env):
