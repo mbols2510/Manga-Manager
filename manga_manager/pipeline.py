@@ -15,7 +15,7 @@ from .covers import CoverStore
 from .history import History
 from .kavita import KavitaClient, KavitaIndex, KavitaSeries
 from .notifier import Notifier
-from . import preferred
+from . import preferred, progress
 from .suwayomi import ActiveDownloads, SuwayomiClient, SuwayomiIndex, SuwayomiManga
 
 log = logging.getLogger(__name__)
@@ -66,10 +66,12 @@ class Pipeline:
         self.history = history
         self.notifier = notifier
         self.sleep = sleep
+        self._carry: list[progress.Carry] = []   # read progress to hand to replacing chapters (#6)
 
     # ------------------------------------------------------------------ run
     def run(self) -> RunResult:
         result = RunResult()
+        self._carry = []
         self.refresh_aliases()
         self.prune_history()
         suwa_index = SuwayomiIndex(self.suwayomi.library())
@@ -90,6 +92,7 @@ class Pipeline:
         if result.processed:
             self._trigger_scans(result.processed)
             kavita_index = self._wait_for_new_series(result.processed, kavita_index)
+            self._restore_progress()
             self._notify(result.processed)
 
         if self.cfg.covers_enabled:
@@ -287,6 +290,10 @@ class Pipeline:
             return [f for f in files if f not in plan.dropped]
         series_name = existing.name if existing else title
         series_id = existing.id if existing else None
+        if series_id is not None:
+            self._carry += progress.snapshot(self.kavita, library.kavita_library_id, series_id,
+                                             [(old.name, incoming.name) for incoming, old, _ in plan.replace
+                                              if old.exists()])
         gone = []
         for incoming, old, label in plan.replace:
             if old.exists():
@@ -301,6 +308,18 @@ class Pipeline:
                                "lower-ranked source, a better file exists")
             log.info("Dropped %s: %s is from a higher-ranked source", incoming.name, old.name)
         return [f for f in files if f not in plan.dropped]
+
+    def _restore_progress(self) -> None:
+        """Give chapters that replaced an older file the read progress of the old one (#6)."""
+        carries, self._carry = self._carry, []
+        if not carries or self.cfg.dry_run:
+            return
+        try:
+            n = progress.restore(self.kavita, carries, self.sleep)
+            if n:
+                log.info("Carried read progress over to %d replaced chapter(s)", n)
+        except Exception as exc:  # never stop a run over this
+            log.warning("Could not carry read progress over: %s", exc)
 
     def preview_preferred(self, suwayomi_title: str) -> dict:
         """What the preferred-source rules would do with the downloads of this title waiting in Suwayomi's folder."""

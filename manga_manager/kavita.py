@@ -126,6 +126,34 @@ class KavitaClient:
             f"scan of series {series_id}",
         )
 
+    # -- read progress -------------------------------------------------------
+    def series_chapters(self, series_id: int) -> list[dict]:
+        """Flat list of the series' chapters as Kavita reports them (id, volumeId, pages, pagesRead, files)."""
+        resp = self._check(self._request("GET", "/api/Series/volumes", params={"seriesId": series_id}),
+                           f"listing chapters of series {series_id}")
+        chapters = []
+        for vol in resp.json() or []:
+            for ch in vol.get("chapters") or []:
+                chapters.append({**ch, "volumeId": ch.get("volumeId", vol.get("id"))})
+        return chapters
+
+    def set_chapter_progress(self, library_id: int, series_id: int, volume_id: int, chapter_id: int,
+                             page: int) -> None:
+        self._check(
+            self._request("POST", "/api/Reader/progress",
+                          json={"libraryId": library_id, "seriesId": series_id, "volumeId": volume_id,
+                                "chapterId": chapter_id, "pageNum": page}),
+            f"saving progress of chapter {chapter_id}",
+        )
+
+    def mark_chapter_read(self, series_id: int, chapter_id: int) -> None:
+        self._check(
+            self._request("POST", "/api/reader/mark-chapter-read",
+                          params={"seriesId": series_id, "chapterId": chapter_id, "generateReadingSession": "false"},
+                          json={"seriesId": series_id, "chapterId": chapter_id}),
+            f"marking chapter {chapter_id} read",
+        )
+
     # -- covers --------------------------------------------------------------
     def upload_series_cover(self, series_id: int, png_bytes: bytes, lock: bool = True) -> str:
         """Set a series cover. Returns the method used ('file' or 'base64').
