@@ -42,6 +42,11 @@ removed (`(Official)`, `[Digital]`, `〘Official〙`, `【Mature】` …). That 
 it points to a single series, so it never guesses between two candidates. An alias is tried first:
 one added on the dashboard, else one from `aliases` in `config.yml`.
 
+At the start of every run, manga in the Suwayomi category `suwayomi.official_library` (default `ADULT_OFFICIAL`) get an
+alias with an **empty** Kavita source (source type official), unless they already have an alias. The run logs each
+one it adds. A manga whose alias has an empty Kavita source is skipped (reported as skipped) and its files stay in
+Suwayomi's folder until the Kavita series is filled in on the dashboard.
+
 New chapters are always moved into the folder Kavita already uses for the series, so a series is
 never split across two folders.
 
@@ -126,7 +131,7 @@ Only libraries listed in the config are touched; other Kavita libraries (4, 5, 6
 | `GET /api/aliases` | every alias (`source`: `dashboard` or `config`; `overridden` when a dashboard alias replaces a config one) and `can_edit` |
 | `POST /api/aliases` | add or change an alias: `{"suwayomi_title", "kavita_name", "previous"?}` (403 for accounts not in `config.yml` when the login is on) |
 | `POST /api/aliases/delete` | delete a dashboard alias: `{"suwayomi_title"}` |
-| `GET /api/aliases/suggestions` | Suwayomi titles and Kavita series names for the alias form (cached 10 minutes) |
+| `GET /api/aliases/suggestions` | Suwayomi titles and Kavita series names for the alias form, plus `manga` (`title`, Suwayomi `id` for the cover, `category`) for the cover cards (cached 10 minutes) |
 | `GET /frame/<category>/<n>` | the category's n-th frame (`/frame/<category>` is the first) |
 | `GET /thumb/<suwayomi id>.png` | cached cover (`?s=<signature>` opens it without a login) |
 | `GET/POST /login`, `GET/POST /signup`, `POST /logout` | dashboard login (when `web.auth.enabled`) |

@@ -71,6 +71,8 @@ class Config:
     suwayomi_username: str = ""
     suwayomi_password: str = ""
     check_download_queue: bool = True   # #8: hold back manga that still have chapters in Suwayomi's queue
+    # #8 (aliases): manga in this Suwayomi category are added to the aliases with an empty Kavita source; "" = off
+    official_library: str = "ADULT_OFFICIAL"
     # kavita
     kavita_url: str = ""
     kavita_api_key: str = ""
@@ -173,7 +175,16 @@ class Config:
         return self._alias_fwd().get(suwayomi_title.casefold())
 
     def suwayomi_title_for(self, kavita_name: str) -> str | None:
-        return {v.casefold(): k for k, v in self.all_aliases().items()}.get(kavita_name.casefold())
+        return {v.casefold(): k for k, v in self.all_aliases().items() if v}.get(kavita_name.casefold())
+
+    def has_alias(self, suwayomi_title: str) -> bool:
+        """True when the title has an alias at all, also one whose Kavita source is still empty."""
+        return suwayomi_title.casefold() in self._alias_fwd()
+
+    def alias_pending(self, suwayomi_title: str) -> bool:
+        """An alias exists (auto-added, #8) but its Kavita source is still empty: nothing is moved for it."""
+        value = self._alias_fwd().get(suwayomi_title.casefold())
+        return value is not None and not value.strip()
 
     def all_aliases(self) -> dict[str, str]:
         """config.yml aliases plus dashboard aliases; a dashboard alias replaces one for the same title."""
@@ -292,6 +303,8 @@ def load_config(path: str | os.PathLike | None = None) -> Config:
         suwayomi_username=str(suwa.get("username", "") or ""),
         suwayomi_password=str(suwa.get("password", "") or ""),
         check_download_queue=_as_bool(suwa.get("check_download_queue"), True),
+        official_library=str(suwa["official_library"] if suwa.get("official_library") is not None
+                             else "ADULT_OFFICIAL").strip(),
         kavita_url=str(kav.get("url", "")).rstrip("/"),
         kavita_api_key=str(kav.get("api_key", "") or ""),
         # public_url: the address Kavita links on the dashboard open (falls back to url)
